@@ -228,6 +228,9 @@
     systemPanel: document.getElementById('systemPanel'),
     systemBadge: document.getElementById('systemBadge'),
     systemDevice: document.getElementById('systemDevice'),
+    systemInstall: document.getElementById('systemInstall'),
+    copyBlackholeCommand: document.getElementById('copyBlackholeCommand'),
+    redetectAudioButton: document.getElementById('redetectAudioButton'),
     systemAccessibility: document.getElementById('systemAccessibility'),
     systemTrigger: document.getElementById('systemTrigger'),
     systemTarget: document.getElementById('systemTarget'),
@@ -764,6 +767,7 @@
       dom.systemAccessibility.textContent = '未检测';
       dom.systemTarget.textContent = '未检测';
       dom.systemSecureInput.textContent = '未检测';
+      dom.systemInstall.hidden = true;
       dom.systemEnableButton.disabled = true;
       return;
     }
@@ -786,6 +790,7 @@
 
     dom.systemDevice.textContent = status.device || '未检测到虚拟麦克风';
     dom.systemDevice.classList.toggle('is-missing', !status.device);
+    dom.systemInstall.hidden = Boolean(status.device) || preparing || !status.helperReady;
 
     dom.systemAccessibility.textContent = status.accessibility ? '已授权' : '未授权';
     dom.systemAccessibility.classList.toggle('is-ok', Boolean(status.accessibility));
@@ -3304,6 +3309,16 @@
         showToast('服务未连接', true);
       } else {
         showToast('正在重新检测系统桥接');
+      }
+    });
+    dom.copyBlackholeCommand.addEventListener('click', () => {
+      copyText('brew install blackhole-2ch', '已复制 BlackHole 安装命令');
+    });
+    dom.redetectAudioButton.addEventListener('click', () => {
+      if (!sendJson({ type: 'system-refresh' })) {
+        showToast('服务未连接', true);
+      } else {
+        showToast('正在重新检测虚拟声卡');
       }
     });
     dom.openAccessibilityButton.addEventListener('click', async () => {

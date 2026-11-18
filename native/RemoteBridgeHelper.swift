@@ -959,6 +959,10 @@ func handle(_ command: [String: Any]) {
         return
 
     case "status":
+        // Pick up a virtual device that was installed after launch.
+        if selectedDevice == nil {
+            selectedDevice = findVirtualDevice(preferredName: preferredDeviceName)
+        }
         sendStatus()
         return
 
