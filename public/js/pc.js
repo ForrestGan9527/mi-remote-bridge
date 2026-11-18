@@ -175,6 +175,7 @@
     keyCount: 0,
     lastKeyAt: 0,
     lastKey: null,
+    latestTranscript: '',
     voices: new Map(),
     voiceOrder: [],
     activeVoiceId: null,
@@ -226,6 +227,7 @@
     voiceHistory: document.getElementById('voiceHistory'),
     voiceHistoryCount: document.getElementById('voiceHistoryCount'),
     autoplayToggle: document.getElementById('autoplayToggle'),
+    copyTranscriptButton: document.getElementById('copyTranscriptButton'),
     feedList: document.getElementById('feedList'),
     clearFeedButton: document.getElementById('clearFeedButton'),
     systemPanel: document.getElementById('systemPanel'),
@@ -1204,6 +1206,10 @@
     if (entry.ended) return;
     const transcript = cleanDisplayText(message.transcript, MAX_TRANSCRIPT_LENGTH, false);
     if (transcript) entry.transcript = transcript;
+    if (entry.transcript) {
+      state.latestTranscript = entry.transcript;
+      dom.copyTranscriptButton.disabled = false;
+    }
     entry.durationMs = Number.isFinite(Number(message.durationMs))
       ? Math.max(0, Number(message.durationMs))
       : null;
@@ -3635,6 +3641,13 @@
 
     dom.voiceHistory.addEventListener('click', handleVoiceHistoryClick);
     dom.autoplayToggle.addEventListener('click', toggleAutoplay);
+    dom.copyTranscriptButton.addEventListener('click', () => {
+      if (!state.latestTranscript) {
+        showToast('还没有可复制的识别文字');
+        return;
+      }
+      copyText(state.latestTranscript, '已复制识别文字，可粘贴到 Windows');
+    });
     dom.clearFeedButton.addEventListener('click', clearFeed);
 
     dom.copyUrlButton.addEventListener('click', () => {
