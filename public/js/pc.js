@@ -189,6 +189,7 @@
     systemPending: null,
     systemPendingTimer: null,
     systemAccessPollTimer: null,
+    voiceTriggerSaving: false,
     capturingActionKey: null,
     designerOpen: false,
     designerDraftLayout: null,
@@ -238,7 +239,7 @@
     copyBlackholeCommand: document.getElementById('copyBlackholeCommand'),
     redetectAudioButton: document.getElementById('redetectAudioButton'),
     systemAccessibility: document.getElementById('systemAccessibility'),
-    systemTrigger: document.getElementById('systemTrigger'),
+    systemTriggerSelect: document.getElementById('systemTriggerSelect'),
     systemTarget: document.getElementById('systemTarget'),
     systemSecureInput: document.getElementById('systemSecureInput'),
     systemNote: document.getElementById('systemNote'),
@@ -795,6 +796,50 @@
     return result;
   }
 
+  async function saveVoiceTriggerFromSystem(value) {
+    if (!state.config || !state.wsOpen) {
+      showToast('服务未连接', true);
+      return;
+    }
+    state.voiceTriggerSaving = true;
+    dom.systemTriggerSelect.disabled = true;
+    try {
+      const response = await fetch('/api/config', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Bridge-Token': state.token
+        },
+        body: JSON.stringify({
+          keys: state.config.keys,
+          voiceTrigger: value,
+          voiceTriggerShortcut: state.config.voiceTriggerShortcut || null
+        })
+      });
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+      if (!response.ok) throw new Error(payload?.error || '保存语音触发键失败');
+      state.config = normalizeClientConfig(payload);
+      state.voiceTrigger = state.config.voiceTrigger;
+      if (!state.dirty && !state.saving) {
+        state.draft = clone(state.config);
+      }
+      syncVoiceTriggerControls();
+      dom.systemTriggerSelect.value = value;
+      showToast('语音触发键已更新');
+    } catch (error) {
+      showToast(error.message || '保存语音触发键失败', true);
+      dom.systemTriggerSelect.value = state.config?.voiceTrigger || 'fn';
+    } finally {
+      state.voiceTriggerSaving = false;
+      dom.systemTriggerSelect.disabled = !state.wsOpen;
+    }
+  }
+
   function updateSystemCard() {
     const status = state.system;
     if (!status) {
@@ -879,17 +924,38 @@
     dom.requestAccessButton.hidden = Boolean(status.accessibility) || !available;
     dom.requestAccessButton.disabled = !available || !status.helperReady;
 
-    const triggerLabels = {
-      fn: 'Fn / 地球键',
-      rightOption: '右 Option',
-      rightCommand: '右 Command',
-      none: '不触发'
-    };
-    dom.systemTrigger.textContent = status.voiceTrigger === 'custom'
-      ? (status.voiceTriggerShortcut
-        ? formatShortcut(status.voiceTriggerShortcut)
-        : '自定义触发键')
-      : (triggerLabels[status.voiceTrigger] || 'Fn / 地球键');
+    const triggerOptions = [
+      { value: 'fn', label: 'Fn / 地球键' },
+      { value: 'rightOption', label: '右 Option' },
+      { value: 'rightCommand', label: '右 Command' },
+      { value: 'rightControl', label: '右 Control' },
+      { value: 'none', label: '不触发' }
+    ];
+    if (status.voiceTrigger === 'custom' || status.voiceTriggerShortcut) {
+      triggerOptions.splice(4, 0, {
+        value: 'custom',
+        label: status.voiceTriggerShortcut
+          ? `自定义 ${formatShortcut(status.voiceTriggerShortcut)}`
+          : '自定义快捷键'
+      });
+    }
+    const triggerSignature = triggerOptions
+      .map((option) => `${option.value}:${option.label}`)
+      .join('|');
+    if (dom.systemTriggerSelect.dataset.signature !== triggerSignature) {
+      const fragment = document.createDocumentFragment();
+      for (const optionInfo of triggerOptions) {
+        const option = document.createElement('option');
+        option.value = optionInfo.value;
+        option.textContent = optionInfo.label;
+        fragment.appendChild(option);
+      }
+      dom.systemTriggerSelect.replaceChildren(fragment);
+      dom.systemTriggerSelect.dataset.signature = triggerSignature;
+    }
+    dom.systemTriggerSelect.value = status.voiceTrigger || 'fn';
+    if (!dom.systemTriggerSelect.value) dom.systemTriggerSelect.value = 'fn';
+    dom.systemTriggerSelect.disabled = !serviceConnected || state.voiceTriggerSaving;
 
     dom.systemTarget.textContent = status.frontmostApp || '未检测';
     dom.systemSecureInput.textContent = status.secureInput ? '已开启（会拦截按键）' : '正常';
@@ -3615,6 +3681,21 @@
       }, 2500);
       setTimeout(() => sendJson({ type: 'system-refresh' }), 1000);
     });
+    dom.systemTriggerSelect.addEventListener('change', () => {
+      const value = dom.systemTriggerSelect.value;
+      if (value === 'custom' && !state.config?.voiceTriggerShortcut) {
+        openConfigDrawer();
+        setTimeout(() => {
+          if (!state.draft) return;
+          dom.voiceTriggerSelect.value = 'custom';
+          state.draft.voiceTrigger = 'custom';
+          startVoiceTriggerCapture();
+          markConfigDirty();
+        }, 80);
+        return;
+      }
+      void saveVoiceTriggerFromSystem(value);
+    });
     dom.refreshSystemButton.addEventListener('click', () => {
       if (!sendJson({ type: 'system-refresh' })) {
         showToast('服务未连接', true);
@@ -3848,7 +3929,7 @@
     normalized.revision = Number.isInteger(config.revision) ? config.revision : 0;
     normalized.updatedAt = typeof config.updatedAt === 'string' ? config.updatedAt : null;
     normalized.audioDevice = typeof config.audioDevice === 'string' ? config.audioDevice : '';
-    if (['fn', 'rightOption', 'rightCommand', 'none', 'custom'].includes(config.voiceTrigger)) {
+    if (['fn', 'rightOption', 'rightCommand', 'rightControl', 'none', 'custom'].includes(config.voiceTrigger)) {
       normalized.voiceTrigger = config.voiceTrigger;
     }
     normalized.voiceTriggerShortcut = normalizeClientVoiceTriggerShortcut(config.voiceTriggerShortcut);

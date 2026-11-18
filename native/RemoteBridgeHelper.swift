@@ -631,6 +631,9 @@ final class KeyInjector {
         case "rightCommand":
             keyCode = 54
             flagValue = .maskCommand
+        case "rightControl":
+            keyCode = 62
+            flagValue = .maskControl
         default:
             return
         }
@@ -644,6 +647,8 @@ final class KeyInjector {
             flags.formUnion(CGEventFlags(rawValue: 0x0000_0040))
         } else if trigger == "rightCommand" {
             flags.formUnion(CGEventFlags(rawValue: 0x0000_0010))
+        } else if trigger == "rightControl" {
+            flags.formUnion(CGEventFlags(rawValue: 0x0000_2000))
         }
         down.type = .flagsChanged
         down.flags = flags
@@ -1050,7 +1055,7 @@ func handle(_ command: [String: Any]) {
     switch type {
     case "configure":
         if let trigger = command["voiceTrigger"] as? String,
-           ["fn", "rightOption", "rightCommand", "none", "custom"].contains(trigger) {
+           ["fn", "rightOption", "rightCommand", "rightControl", "none", "custom"].contains(trigger) {
             voiceTrigger = trigger
         }
         if let shortcut = command["voiceTriggerShortcut"] as? [String: Any],

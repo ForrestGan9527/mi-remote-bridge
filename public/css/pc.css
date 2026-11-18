@@ -2527,6 +2527,14 @@ body.drawer-open {
   font-size: 9px;
 }
 
+.system-trigger-select {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 24px 0 8px;
+  font-size: 8.5px;
+}
+
 .system-install {
   border-radius: 11px;
   border: 1px solid rgba(255, 117, 41, 0.16);
