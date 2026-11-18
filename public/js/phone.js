@@ -121,8 +121,6 @@
   let waveBars = [];
   const pressedButtons = new Set();
 
-  init();
-
   function init() {
     if (IS_PREVIEW) {
       initPreview();
@@ -284,17 +282,59 @@
     if (state.voice) state.voiceButton?.classList.add('is-recording');
   }
 
+  const PAIR_STORAGE_KEY = 'remoteBridge.pair';
+
+  function readStoredPairToken() {
+    try {
+      const stored = localStorage.getItem(PAIR_STORAGE_KEY);
+      if (stored) return stored;
+    } catch {
+      // localStorage can be unavailable in private browsing modes.
+    }
+    try {
+      return sessionStorage.getItem(PAIR_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  function storePairToken(token) {
+    try {
+      localStorage.setItem(PAIR_STORAGE_KEY, token);
+    } catch {
+      // Fall back to sessionStorage below.
+    }
+    try {
+      sessionStorage.setItem(PAIR_STORAGE_KEY, token);
+    } catch {
+      // Storage is optional; the URL pair token still works for this load.
+    }
+  }
+
+  function clearStoredPairToken() {
+    try {
+      localStorage.removeItem(PAIR_STORAGE_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
+    try {
+      sessionStorage.removeItem(PAIR_STORAGE_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
   function readPairToken() {
     try {
       const url = new URL(location.href);
       const fromUrl = url.searchParams.get('pair');
       if (fromUrl) {
-        sessionStorage.setItem('remoteBridge.pair', fromUrl);
+        storePairToken(fromUrl);
         url.searchParams.delete('pair');
         history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
         return fromUrl;
       }
-      return sessionStorage.getItem('remoteBridge.pair');
+      return readStoredPairToken();
     } catch {
       return null;
     }
@@ -400,11 +440,13 @@
       case 'error':
         showToast(message.message || '服务器返回了一个错误');
         if (message.code === 'unauthorized') {
+          clearStoredPairToken();
+          state.token = null;
           state.pairInvalid = true;
           updateConnectionUI();
           showVoiceModal({
             title: '配对已失效',
-            body: '这次配对已随电脑端服务重启而失效。请重新扫描电脑端显示的二维码。',
+            body: '配对码已失效（可能已重新生成）。请重新扫描电脑端显示的二维码。',
             uploadAvailable: false,
             icon: 'info'
           });
@@ -1647,4 +1689,5 @@
         return 'audio/mp4';
     }
   }
+  init();
 })();

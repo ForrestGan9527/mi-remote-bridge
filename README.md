@@ -108,6 +108,7 @@ npm run build:dmg
 运行时文件位置：
 
 - 配置：`~/Library/Application Support/RemoteBridge/config.json`
+- 配对码：`~/Library/Application Support/RemoteBridge/pair-token`
 - HTTPS 证书：`~/Library/Application Support/RemoteBridge/certs/`
 - 日志：`~/Library/Logs/RemoteBridge/server.log`
 
@@ -123,11 +124,12 @@ npm run build:dmg
 
 此版本加入了最小化的局域网配对：
 
-- 服务每次启动都会生成新的 192 位随机 token。
-- 手机二维码 URL 带有 `?pair=...`；手机只在 URL 中拿到一次，随后保存在当前标签页的 `sessionStorage`。
+- 第一次启动会生成一个 192 位随机 token，并保存在数据目录的 `pair-token` 文件（权限 `0600`）；后续重启沿用同一个 token。
+- 手机二维码 URL 带有 `?pair=...`；手机拿到后保存到 `localStorage`（隐私模式下退回 `sessionStorage`）。只要 token 和访问地址不变，重新打开页面或重启应用都**不需要重新扫码**。
 - 电脑接收端必须从运行服务的电脑本机（localhost / 127.0.0.1）获取 token。
 - 配置、连接信息、系统设置接口和 WebSocket 都要求 token。
-- 服务重启后旧二维码和旧 token 立即失效，需要重新扫描。
+- 需要让旧二维码失效时：退出应用，删除数据目录里的 `pair-token`（开发时是 `data/pair-token`，打包应用是 `~/Library/Application Support/RemoteBridge/pair-token`），再启动应用，然后重新扫码。
+- 如果 Mac 的局域网 IP 发生变化，手机访问地址也会变，仍需要重新扫码/打开新地址。
 - 系统桥接默认关闭；必须由当前连接的电脑端显式启用。最后一个已启用的电脑端断开时，服务会自动关闭系统桥接。
 
 这适合受信任的家庭 / 办公局域网，但没有账号体系、设备审批或多用户权限。不要把 3000 / 3443 端口直接暴露到公网。
@@ -457,6 +459,17 @@ npm test
 - 配对 token 是局域网级轻量方案，不是账号体系。请勿公网暴露服务。
 
 ## 常见问题
+
+**重启应用后还需要重新扫码吗？**
+
+不需要。首次扫码后，配对码保存在数据目录的 `pair-token` 文件里，手机会用 `localStorage` 记住它；只要访问地址不变，重启应用或刷新页面都会自动重连。
+
+以下情况仍需重新扫码：
+
+- 删除了 `pair-token`（主动重置配对）；
+- Mac 的局域网 IP / 访问地址发生变化；
+- 手机使用了隐私模式或清除了浏览器数据；
+- 服务端提示配对失效。
 
 **没有安装虚拟声卡 / 显示「未检测到虚拟麦克风」**
 

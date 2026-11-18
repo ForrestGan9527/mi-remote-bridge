@@ -405,3 +405,38 @@ test('bridge server handles config, keys, voice, and presence', async (t) => {
     }
   });
 });
+
+test('pairing token persists across server restarts', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-pair-'));
+  const options = {
+    rootDir: ROOT_DIR,
+    dataDir: tempDir,
+    https: false,
+    systemBridge: false,
+    logger: { info() {}, warn() {} }
+  };
+
+  try {
+    const first = await createBridgeServer(options);
+    const firstPorts = await first.start({ httpPort: 0, httpsPort: 0 });
+    const firstToken = await (await fetch(
+      `http://127.0.0.1:${firstPorts.httpPort}/api/session`
+    )).json();
+    await first.stop();
+
+    const stored = fs.readFileSync(path.join(tempDir, 'pair-token'), 'utf8').trim();
+    assert.equal(stored, firstToken.token);
+    assert.equal(fs.statSync(path.join(tempDir, 'pair-token')).mode & 0o777, 0o600);
+
+    const second = await createBridgeServer(options);
+    const secondPorts = await second.start({ httpPort: 0, httpsPort: 0 });
+    const secondToken = await (await fetch(
+      `http://127.0.0.1:${secondPorts.httpPort}/api/session`
+    )).json();
+    await second.stop();
+
+    assert.equal(secondToken.token, firstToken.token);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

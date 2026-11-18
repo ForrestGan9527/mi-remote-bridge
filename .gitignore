@@ -8,3 +8,4 @@ npm-debug.log*
 native/.build/
 dist/
 .signing/
+data/pair-token
