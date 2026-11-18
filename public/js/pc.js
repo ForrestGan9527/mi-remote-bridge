@@ -230,6 +230,8 @@
     systemDevice: document.getElementById('systemDevice'),
     systemDeviceSelect: document.getElementById('systemDeviceSelect'),
     systemInstall: document.getElementById('systemInstall'),
+    systemInstallState: document.getElementById('systemInstallState'),
+    copyCoreaudiodCommand: document.getElementById('copyCoreaudiodCommand'),
     copyBlackholeCommand: document.getElementById('copyBlackholeCommand'),
     redetectAudioButton: document.getElementById('redetectAudioButton'),
     systemAccessibility: document.getElementById('systemAccessibility'),
@@ -795,7 +797,7 @@
       dom.systemAccessibility.textContent = '未检测';
       dom.systemTarget.textContent = '未检测';
       dom.systemSecureInput.textContent = '未检测';
-      dom.systemInstall.hidden = true;
+      dom.systemInstallState.textContent = '正在检测虚拟声卡…';
       dom.systemEnableButton.disabled = true;
       return;
     }
@@ -848,7 +850,21 @@
       dom.systemDeviceSelect.disabled = !serviceConnected || !status.helperReady;
     }
 
-    dom.systemInstall.hidden = hasVirtualDevices || preparing || !status.helperReady;
+    dom.systemInstallState.textContent = !status.helperReady
+      ? '正在检测虚拟声卡…'
+      : hasVirtualDevices
+        ? `当前已检测到：${status.device || virtualDevices[0]?.name || '虚拟声卡'}`
+        : '当前未检测到虚拟声卡';
+
+    if (!hasVirtualDevices) {
+      if (dom.systemInstall.dataset.wasMissing !== '1') {
+        dom.systemInstall.open = true;
+      }
+      dom.systemInstall.dataset.wasMissing = '1';
+    } else if (dom.systemInstall.dataset.wasMissing === '1') {
+      dom.systemInstall.open = false;
+      delete dom.systemInstall.dataset.wasMissing;
+    }
 
     dom.systemAccessibility.textContent = status.accessibility ? '已授权' : '未授权';
     dom.systemAccessibility.classList.toggle('is-ok', Boolean(status.accessibility));
@@ -3380,6 +3396,9 @@
     });
     dom.copyBlackholeCommand.addEventListener('click', () => {
       copyText('brew install blackhole-2ch', '已复制 BlackHole 安装命令');
+    });
+    dom.copyCoreaudiodCommand.addEventListener('click', () => {
+      copyText('sudo killall coreaudiod', '已复制重启音频服务命令');
     });
     dom.redetectAudioButton.addEventListener('click', () => {
       if (!sendJson({ type: 'system-refresh' })) {

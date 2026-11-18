@@ -176,16 +176,26 @@
               <span class="system-row-value" id="systemDevice">正在检测…</span>
               <select class="config-select system-device-select" id="systemDeviceSelect" aria-label="选择虚拟麦克风" hidden></select>
             </div>
-            <div class="system-install" id="systemInstall" hidden>
-              <strong>未检测到虚拟声卡</strong>
-              <p>语音需要 <code>BlackHole 2ch</code>、<code>MiRemoteV 2ch</code> 或 <code>SayAll</code> 之一。推荐安装 BlackHole 2ch，安装后语音才能进入输入法和会议软件。</p>
-              <div class="system-install-actions">
-                <a class="system-install-link" id="blackholeDownloadLink" href="https://existential.audio/blackhole/" target="_blank" rel="noopener noreferrer">下载 BlackHole 2ch</a>
-                <button class="system-install-button" id="copyBlackholeCommand" type="button">复制 Homebrew 命令</button>
-                <button class="text-button" id="redetectAudioButton" type="button">重新检测</button>
+            <details class="system-install" id="systemInstall">
+              <summary class="system-install-summary">
+                <span>虚拟声卡需要单独安装 · BlackHole 2ch</span>
+                <span class="system-install-chevron" aria-hidden="true"></span>
+              </summary>
+              <div class="system-install-body">
+                <p class="system-install-state" id="systemInstallState">正在检测虚拟声卡…</p>
+                <p>手机语音需要写入 macOS 虚拟声卡，项目不包含驱动。推荐安装免费的 <code>BlackHole 2ch</code>；也可以使用 <code>MiRemoteV 2ch</code> 或 <code>SayAll</code>。</p>
+                <p><strong>方式一 · Homebrew</strong></p>
+                <p><code>brew install blackhole-2ch</code></p>
+                <p><strong>方式二 · 官方安装包</strong>：点击下方「下载 BlackHole 2ch」。</p>
+                <p>安装后重启电脑，或执行 <code>sudo killall coreaudiod</code>。然后点击「重新检测」，在「虚拟麦克风」下拉框选择 <code>BlackHole 2ch</code>，并在输入法 / 会议软件中把麦克风设为它。</p>
+                <div class="system-install-actions">
+                  <a class="system-install-link" id="blackholeDownloadLink" href="https://existential.audio/blackhole/" target="_blank" rel="noopener noreferrer">下载 BlackHole 2ch</a>
+                  <button class="system-install-button" id="copyBlackholeCommand" type="button">复制 Homebrew 命令</button>
+                  <button class="system-install-button" id="copyCoreaudiodCommand" type="button">复制重启命令</button>
+                  <button class="text-button" id="redetectAudioButton" type="button">重新检测</button>
+                </div>
               </div>
-              <p class="system-install-hint">安装后重启电脑，或执行 <code>sudo killall coreaudiod</code>。</p>
-            </div>
+            </details>
             <div class="system-row">
               <span class="system-row-label">辅助功能</span>
               <span class="system-row-value" id="systemAccessibility">未检测</span>

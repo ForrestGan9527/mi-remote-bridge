@@ -273,6 +273,8 @@ MiRemoteV 2ch / SayAll / BlackHole 2ch
 2. `MiRemoteV` / `SayAll`
 3. `BlackHole`
 
+系统桥接卡片始终显示「虚拟声卡需要单独安装 · BlackHole 2ch」折叠说明，展开后可查看官方下载链接、Homebrew 命令、重启音频服务命令和安装步骤。
+
 安装 BlackHole 后，在电脑端点击「重新检测」，下拉框中就会出现 `BlackHole 2ch`；选中即可体验。普通扬声器不会出现在这个下拉框中。
 
 ## HTTPS 与手机麦克风

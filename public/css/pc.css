@@ -2418,10 +2418,60 @@ body.drawer-open {
 }
 
 .system-install {
-  padding: 10px 11px;
   border-radius: 11px;
   border: 1px solid rgba(255, 117, 41, 0.16);
   background: rgba(255, 117, 41, 0.04);
+  overflow: hidden;
+}
+
+.system-install-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  color: #f0b692;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.system-install-summary::-webkit-details-marker {
+  display: none;
+}
+
+.system-install-summary:focus-visible {
+  outline: 1px solid rgba(255, 117, 41, 0.4);
+  outline-offset: -2px;
+}
+
+.system-install-chevron {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  margin-right: 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.system-install[open] .system-install-chevron {
+  transform: rotate(225deg);
+}
+
+.system-install-body {
+  padding: 0 11px 10px;
+}
+
+.system-install-body p:first-child {
+  margin-top: 0;
+}
+
+.system-install-state {
+  color: var(--muted-deep) !important;
 }
 
 .system-install strong {
