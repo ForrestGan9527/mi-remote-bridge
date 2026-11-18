@@ -266,7 +266,27 @@
             </div>
           </div>
 
-          <p class="connect-note" id="connectNote">手机与电脑连接同一个 Wi-Fi，然后扫描二维码。</p>
+          <p class="connect-note" id="connectNote">手机与电脑连接同一个 Wi-Fi 或蓝牙网络，然后扫描二维码。</p>
+
+          <div class="connect-address" id="connectAddressRow" hidden>
+            <span>连接地址</span>
+            <select class="config-select connect-address-select" id="connectAddressSelect" aria-label="选择手机连接地址"></select>
+          </div>
+
+          <details class="connect-bluetooth" id="bluetoothConnectGuide">
+            <summary>
+              <span>没有 Wi-Fi？使用蓝牙网络连接</span>
+              <span class="connect-bluetooth-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="connect-bluetooth-body">
+              <ol>
+                <li>Android：打开「设置 → 网络 → 热点与共享 → 蓝牙网络共享」；iPhone 可使用个人热点（USB / 蓝牙 / Wi-Fi）。</li>
+                <li>Mac：打开「系统设置 → 蓝牙」，与手机配对，并在网络设置中连接蓝牙 PAN / 热点。</li>
+                <li>回到本页，在「连接地址」下拉框选择蓝牙 / PAN 地址，再扫描上方二维码。</li>
+              </ol>
+              <p class="connect-bluetooth-note">蓝牙网络适合按键控制；语音 PCM 带宽较高，建议语音仍使用 Wi-Fi。连接蓝牙网络后启动 Remote Bridge，HTTPS 证书会包含新的蓝牙 IP。</p>
+            </div>
+          </details>
 
           <div class="url-box">
             <code id="connectUrl">正在获取地址…</code>

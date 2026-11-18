@@ -125,6 +125,9 @@ test('bridge server handles config, keys, voice, and presence', async (t) => {
     assert.match(connectInfo.primaryUrl, /^http:\/\//);
     assert.match(connectInfo.primaryUrl, /[?&]pair=/);
     assert.match(connectInfo.qrDataUrl, /^data:image\/png;base64,/);
+    assert.ok(Array.isArray(connectInfo.endpoints));
+    assert.equal(connectInfo.endpoints[0].primaryUrl, connectInfo.primaryUrl);
+    assert.match(connectInfo.endpoints[0].qrDataUrl, /^data:image\/png;base64,/);
 
     const invalidResponse = await fetch(`${baseUrl}/api/config`, {
       method: 'PUT',

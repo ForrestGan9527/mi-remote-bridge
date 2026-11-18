@@ -170,6 +170,7 @@
     dirty: false,
     saving: false,
     connectInfo: null,
+    connectEndpoint: null,
     keyCount: 0,
     lastKeyAt: 0,
     lastKey: null,
@@ -252,6 +253,8 @@
     connectStatus: document.getElementById('connectStatus'),
     connectNote: document.getElementById('connectNote'),
     connectUrl: document.getElementById('connectUrl'),
+    connectAddressRow: document.getElementById('connectAddressRow'),
+    connectAddressSelect: document.getElementById('connectAddressSelect'),
     securityBadge: document.getElementById('securityBadge'),
     qrImage: document.getElementById('qrImage'),
     qrLoading: document.getElementById('qrLoading'),
@@ -3320,24 +3323,68 @@
   }
 
   function renderConnectInfo(info) {
-    dom.connectUrl.textContent = info.primaryUrl;
+    const endpoints = Array.isArray(info.endpoints) && info.endpoints.length
+      ? info.endpoints
+      : [{
+        address: info.primaryUrl,
+        label: '当前地址',
+        bluetooth: false,
+        primaryUrl: info.primaryUrl,
+        primaryProtocol: info.primaryProtocol,
+        urls: info.urls,
+        qrDataUrl: info.qrDataUrl
+      }];
 
     const httpsAvailable = Boolean(info.httpsAvailable);
     dom.securityBadge.textContent = httpsAvailable ? 'HTTPS' : 'HTTP';
     dom.securityBadge.classList.toggle('is-http', !httpsAvailable);
 
-    const httpUrl = info.urls?.find((item) => item.protocol === 'http')?.url || '';
-    dom.httpUrl.textContent = httpUrl || '当前没有 HTTP 地址';
-    dom.toggleHttpButton.hidden = !httpUrl;
-
-    dom.connectNote.textContent = httpsAvailable
-      ? `${info.note || '手机和电脑连接同一个 Wi-Fi'}。首次打开 HTTPS 时，请在手机上选择继续访问。`
-      : '当前只能使用 HTTP 连接，手机端将无法录音。请查看 README 配置 HTTPS。';
-
     dom.serverMeta.textContent = [
       `HTTP :${info.httpPort}`,
       httpsAvailable ? `HTTPS :${info.httpsPort}` : ''
     ].filter(Boolean).join(' · ');
+
+    const previousAddress = state.connectEndpoint?.address;
+    let selected = endpoints.find((endpoint) => endpoint.address === previousAddress);
+    if (!selected) selected = endpoints[0];
+
+    const showSelect = endpoints.length > 1;
+    dom.connectAddressRow.hidden = !showSelect;
+    if (showSelect) {
+      const fragment = document.createDocumentFragment();
+      endpoints.forEach((endpoint, index) => {
+        const option = document.createElement('option');
+        option.value = String(index);
+        const kind = endpoint.bluetooth ? '蓝牙' : endpoint.label;
+        option.textContent = `${kind} · ${endpoint.address}`;
+        fragment.appendChild(option);
+      });
+      dom.connectAddressSelect.replaceChildren(fragment);
+      dom.connectAddressSelect.value = String(endpoints.indexOf(selected));
+    }
+
+    applyConnectEndpoint(info, selected);
+  }
+
+  function applyConnectEndpoint(info, endpoint) {
+    state.connectEndpoint = endpoint;
+    const httpsAvailable = Boolean(info.httpsAvailable);
+
+    dom.connectUrl.textContent = endpoint.primaryUrl;
+
+    const httpUrl = endpoint.urls?.find((item) => item.protocol === 'http')?.url || '';
+    dom.httpUrl.textContent = httpUrl || '当前没有 HTTP 地址';
+    dom.toggleHttpButton.hidden = !httpUrl;
+    if (!httpUrl) {
+      dom.httpRow.hidden = true;
+      dom.toggleHttpButton.setAttribute('aria-expanded', 'false');
+      dom.toggleHttpButton.textContent = 'HTTP 备用地址';
+    }
+
+    const addressKind = endpoint.bluetooth ? '蓝牙网络' : (endpoint.label || '当前地址');
+    dom.connectNote.textContent = httpsAvailable
+      ? `${info.note || '手机和电脑连接同一个 Wi-Fi 或蓝牙网络'} 当前地址：${addressKind}（${endpoint.address}）。首次打开 HTTPS 时，请在手机上选择继续访问。`
+      : '当前只能使用 HTTP 连接，手机端将无法录音。请查看 README 配置 HTTPS。';
 
     dom.qrImage.onload = () => {
       dom.qrLoading.hidden = true;
@@ -3349,7 +3396,11 @@
       const label = dom.qrLoading.querySelector('span:last-child');
       if (label) label.textContent = '二维码加载失败';
     };
-    dom.qrImage.src = info.qrDataUrl;
+    dom.qrImage.hidden = true;
+    dom.qrLoading.hidden = false;
+    const loadingLabel = dom.qrLoading.querySelector('span:last-child');
+    if (loadingLabel) loadingLabel.textContent = '正在生成二维码';
+    dom.qrImage.src = endpoint.qrDataUrl;
   }
 
   function copyText(text, successMessage) {
@@ -3442,10 +3493,18 @@
     dom.clearFeedButton.addEventListener('click', clearFeed);
 
     dom.copyUrlButton.addEventListener('click', () => {
-      copyText(state.connectInfo?.primaryUrl, '已复制手机端地址');
+      copyText(state.connectEndpoint?.primaryUrl, '已复制手机端地址');
+    });
+    dom.connectAddressSelect.addEventListener('change', () => {
+      const endpoints = state.connectInfo?.endpoints || [];
+      const endpoint = endpoints[Number(dom.connectAddressSelect.value)];
+      if (!endpoint) return;
+      applyConnectEndpoint(state.connectInfo, endpoint);
+      showToast(`正在使用 ${endpoint.bluetooth ? '蓝牙网络' : endpoint.label} · ${endpoint.address}`);
     });
     dom.copyHttpButton.addEventListener('click', () => {
-      const httpUrl = state.connectInfo?.urls?.find((item) => item.protocol === 'http')?.url;
+      const httpUrl = state.connectEndpoint?.urls
+        ?.find((item) => item.protocol === 'http')?.url;
       copyText(httpUrl, '已复制 HTTP 地址');
     });
     dom.toggleHttpButton.addEventListener('click', () => {
