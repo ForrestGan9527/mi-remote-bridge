@@ -241,6 +241,8 @@
     copyBlackholeCommand: document.getElementById('copyBlackholeCommand'),
     redetectAudioButton: document.getElementById('redetectAudioButton'),
     systemAccessibility: document.getElementById('systemAccessibility'),
+    systemDefaultInput: document.getElementById('systemDefaultInput'),
+    setDefaultMicButton: document.getElementById('setDefaultMicButton'),
     systemTriggerSelect: document.getElementById('systemTriggerSelect'),
     systemTarget: document.getElementById('systemTarget'),
     systemSecureInput: document.getElementById('systemSecureInput'),
@@ -850,6 +852,7 @@
       dom.systemDevice.textContent = '正在检测…';
       dom.systemDeviceSelect.hidden = true;
       dom.systemAccessibility.textContent = '未检测';
+      dom.systemDefaultInput.textContent = '未检测';
       dom.systemTarget.textContent = '未检测';
       dom.systemSecureInput.textContent = '未检测';
       dom.systemInstallState.textContent = '正在检测虚拟声卡…';
@@ -925,6 +928,18 @@
     dom.systemAccessibility.classList.toggle('is-ok', Boolean(status.accessibility));
     dom.requestAccessButton.hidden = Boolean(status.accessibility) || !available;
     dom.requestAccessButton.disabled = !available || !status.helperReady;
+
+    dom.systemDefaultInput.textContent = status.defaultInputName || '未检测';
+    const inputMismatch = Boolean(
+      status.deviceUID
+      && status.defaultInputUID
+      && status.deviceUID !== status.defaultInputUID
+    );
+    dom.systemDefaultInput.classList.toggle('is-missing', inputMismatch);
+    dom.systemDefaultInput.title = inputMismatch
+      ? '当前虚拟麦克风不是系统默认输入；如果输入法使用默认麦克风，请切换设备或点击“设为默认输入”'
+      : '';
+    dom.setDefaultMicButton.disabled = !available || !status.device;
 
     const triggerOptions = [
       { value: 'fn', label: 'Fn / 地球键' },
@@ -1033,6 +1048,11 @@
 
   function handleSystemEvent(event) {
     if (!event) return;
+    if (event.ok && event.action === 'captureText') {
+      addFeed('system', '识别文字已复制', event.message || '已复制识别文字');
+      showToast('已复制识别文字，可在 Windows 中粘贴');
+      return;
+    }
     if (!event.ok) {
       addFeed('system', '系统动作执行失败', event.message || event.action);
       showToast(event.message || '系统动作执行失败', true);
@@ -3708,6 +3728,13 @@
         return;
       }
       void saveVoiceTriggerFromSystem(value);
+    });
+    dom.setDefaultMicButton.addEventListener('click', () => {
+      if (!sendJson({ type: 'system-set-default-input' })) {
+        showToast('服务未连接', true);
+      } else {
+        showToast('已将当前虚拟麦克风设为系统默认输入');
+      }
     });
     dom.refreshSystemButton.addEventListener('click', () => {
       if (!sendJson({ type: 'system-refresh' })) {

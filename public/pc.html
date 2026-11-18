@@ -216,6 +216,10 @@
               </div>
             </details>
             <div class="system-row">
+              <span class="system-row-label">系统默认输入</span>
+              <span class="system-row-value" id="systemDefaultInput">未检测</span>
+            </div>
+            <div class="system-row">
               <span class="system-row-label">辅助功能</span>
               <span class="system-row-value" id="systemAccessibility">未检测</span>
               <button class="text-button" id="requestAccessButton" type="button" hidden>授权</button>
@@ -245,6 +249,7 @@
             <p class="system-error" id="systemError" hidden></p>
             <div class="system-links">
               <button class="text-button" id="refreshSystemButton" type="button">重新检测</button>
+              <button class="text-button" id="setDefaultMicButton" type="button">设为默认输入</button>
               <button class="text-button" id="openAccessibilityButton" type="button">打开辅助功能设置</button>
             </div>
           </div>

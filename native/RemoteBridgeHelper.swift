@@ -95,6 +95,43 @@ func allAudioDevices() -> [AudioDeviceInfo] {
     }
 }
 
+func defaultInputDeviceID() -> AudioDeviceID? {
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultInputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var deviceID = AudioDeviceID(0)
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    let status = AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject),
+        &address,
+        0,
+        nil,
+        &size,
+        &deviceID
+    )
+    return status == noErr && deviceID != 0 ? deviceID : nil
+}
+
+func setDefaultInputDevice(_ deviceID: AudioDeviceID) -> Bool {
+    var id = deviceID
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultInputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    let status = AudioObjectSetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject),
+        &address,
+        0,
+        nil,
+        UInt32(MemoryLayout<AudioDeviceID>.size),
+        &id
+    )
+    return status == noErr
+}
+
 func findVirtualDevice(preferredName: String?) -> AudioDeviceInfo? {
     let devices = allAudioDevices()
     if let preferredName, !preferredName.isEmpty {
@@ -197,6 +234,182 @@ private struct KeyMap {
         "ArrowLeft": 123, "ArrowRight": 124, "ArrowDown": 125, "ArrowUp": 126,
         "NumpadEnter": 76
     ]
+}
+
+func axCopyElement(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
+          let value,
+          CFGetTypeID(value) == AXUIElementGetTypeID() else {
+        return nil
+    }
+    return unsafeBitCast(value, to: AXUIElement.self)
+}
+
+func axRole(_ element: AXUIElement) -> String? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &value) == .success else {
+        return nil
+    }
+    return value as? String
+}
+
+func axIsTextRole(_ role: String) -> Bool {
+    let roles: Set<String> = [
+        kAXTextFieldRole as String,
+        kAXTextAreaRole as String,
+        kAXComboBoxRole as String,
+        "AXSearchField"
+    ]
+    return roles.contains(role)
+}
+
+func axReadText(_ element: AXUIElement) -> String? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success,
+          let value else {
+        return nil
+    }
+    if let text = value as? String {
+        return text
+    }
+    if let attributed = value as? NSAttributedString {
+        return attributed.string
+    }
+    return nil
+}
+
+func axFindText(in element: AXUIElement, depth: Int, visited: Int) -> AXUIElement? {
+    guard depth < 10, visited < 500 else { return nil }
+    if let role = axRole(element), axIsTextRole(role) {
+        return element
+    }
+    var childrenRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(
+        element,
+        kAXChildrenAttribute as CFString,
+        &childrenRef
+    ) == .success,
+          let children = childrenRef as? [AXUIElement] else {
+        return nil
+    }
+    var count = visited
+    for child in children {
+        count += 1
+        if let found = axFindText(in: child, depth: depth + 1, visited: count) {
+            return found
+        }
+    }
+    return nil
+}
+
+func axFocusedTextElement() -> AXUIElement? {
+    guard let application = NSWorkspace.shared.frontmostApplication else { return nil }
+    let appElement = AXUIElementCreateApplication(application.processIdentifier)
+    if let focused = axCopyElement(appElement, kAXFocusedUIElementAttribute as String),
+       let role = axRole(focused),
+       axIsTextRole(role) {
+        return focused
+    }
+    if let window = axCopyElement(appElement, kAXFocusedWindowAttribute as String) {
+        return axFindText(in: window, depth: 0, visited: 0)
+    }
+    return nil
+}
+
+func insertedText(before: String, after: String) -> String? {
+    if before == after { return nil }
+    let old = Array(before)
+    let new = Array(after)
+    var prefix = 0
+    while prefix < old.count, prefix < new.count, old[prefix] == new[prefix] {
+        prefix += 1
+    }
+    var suffix = 0
+    while suffix < old.count - prefix,
+          suffix < new.count - prefix,
+          old[old.count - 1 - suffix] == new[new.count - 1 - suffix] {
+        suffix += 1
+    }
+    let start = prefix
+    let end = new.count - suffix
+    guard start < end else { return nil }
+    return String(new[start..<end])
+}
+
+final class TextCapture {
+    private let queue = DispatchQueue(label: "remote-bridge.text-capture")
+    private var element: AXUIElement?
+    private var beforeValue = ""
+    private var lastValue = ""
+    private var lastChangeAt = Date()
+    private var startedAt = Date()
+    private var timer: DispatchSourceTimer?
+
+    func begin() {
+        cancel()
+        element = axFocusedTextElement()
+        beforeValue = element.flatMap(axReadText) ?? ""
+        lastValue = beforeValue
+        startedAt = Date()
+        lastChangeAt = startedAt
+    }
+
+    func finish() {
+        guard element != nil else { return }
+        startedAt = Date()
+        lastChangeAt = Date()
+        let source = DispatchSource.makeTimerSource(queue: queue)
+        source.schedule(deadline: .now() + 0.4, repeating: 0.4)
+        source.setEventHandler { [weak self] in
+            self?.poll()
+        }
+        timer = source
+        source.resume()
+    }
+
+    func cancel() {
+        timer?.cancel()
+        timer = nil
+        element = nil
+        beforeValue = ""
+        lastValue = ""
+    }
+
+    private func poll() {
+        guard let element else {
+            cancel()
+            return
+        }
+        let now = Date()
+        if let current = axReadText(element), current != lastValue {
+            lastValue = current
+            lastChangeAt = now
+        }
+        let stableFor = now.timeIntervalSince(lastChangeAt)
+        let elapsed = now.timeIntervalSince(startedAt)
+        if lastValue == beforeValue {
+            if elapsed > 12 { cancel() }
+            return
+        }
+        if stableFor < 1.2 && elapsed < 12 {
+            return
+        }
+        let text = insertedText(before: beforeValue, after: lastValue) ?? ""
+        if !text.isEmpty {
+            copyToClipboard(text)
+            emit(["type": "captured-text", "text": text])
+        }
+        cancel()
+    }
+
+    private func copyToClipboard(_ text: String) {
+        DispatchQueue.main.async {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+        }
+    }
 }
 
 final class KeyInjector {
@@ -986,6 +1199,7 @@ final class VirtualAudioOutput {
 let commandQueue = DispatchQueue(label: "remote-bridge.helper.commands")
 let output = VirtualAudioOutput()
 let keys = KeyInjector()
+let textCapture = TextCapture()
 var selectedDevice: AudioDeviceInfo?
 var voiceTrigger = "fn"
 var voiceTriggerShortcut: [String: Any]?
@@ -1012,6 +1226,12 @@ func currentStatus() -> [String: Any] {
         "frontmostApp": frontmost?.localizedName ?? "",
         "frontmostBundleId": frontmost?.bundleIdentifier ?? "",
         "secureInput": IsSecureEventInputEnabled(),
+        "defaultInputName": defaultInputDeviceID().flatMap {
+            stringProperty($0, kAudioObjectPropertyName)
+        } ?? "",
+        "defaultInputUID": defaultInputDeviceID().flatMap {
+            stringProperty($0, kAudioDevicePropertyDeviceUID)
+        } ?? "",
         "devices": devices
     ]
     if let selectedDevice {
@@ -1069,6 +1289,18 @@ func handle(_ command: [String: Any]) {
         configureDevice(command["audioDevice"] as? String)
         return
 
+    case "set-default-input":
+        guard let device = selectedDevice ?? findVirtualDevice(preferredName: preferredDeviceName) else {
+            emitError("没有可用的虚拟音频设备", code: "virtual_device_missing")
+            sendStatus()
+            return
+        }
+        if !setDefaultInputDevice(device.id) {
+            emitError("无法设置系统默认输入设备", code: "default_input_failed")
+        }
+        sendStatus()
+        return
+
     case "status":
         // Pick up a virtual device that was installed after launch.
         if selectedDevice == nil {
@@ -1097,6 +1329,7 @@ func handle(_ command: [String: Any]) {
             emitError(started.1, code: "audio_start_failed")
             return
         }
+        textCapture.begin()
         keys.pressVoiceTrigger(trigger)
         emit([
             "type": "audio-started",
@@ -1119,6 +1352,7 @@ func handle(_ command: [String: Any]) {
         output.finish {
             commandQueue.async {
                 keys.releaseVoiceTrigger()
+                textCapture.finish()
                 emit(["type": "audio-ended"])
             }
         }
