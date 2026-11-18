@@ -18,6 +18,7 @@ const { spawnSync } = require('node:child_process');
 const rootDir = path.resolve(__dirname, '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
 const version = pkg.version || '1.0.0';
+const buildDmg = process.argv.includes('--dmg');
 const arch = process.arch === 'arm64' ? 'arm64' : 'x86_64';
 const appName = 'Remote Bridge';
 const bundleId = 'com.remotebridge.mac';
@@ -356,7 +357,9 @@ function main() {
   run(process.execPath, [path.join(rootDir, 'scripts', 'build-native.js')]);
 
   fs.mkdirSync(distDir, { recursive: true });
-  for (const stale of [appPath, buildDir, dmgPath]) {
+  const staleTargets = [appPath, buildDir];
+  if (buildDmg) staleTargets.push(dmgPath);
+  for (const stale of staleTargets) {
     fs.rmSync(stale, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
   fs.mkdirSync(path.join(contentsDir, 'MacOS'), { recursive: true });
@@ -395,12 +398,16 @@ function main() {
   createHelperApp(helperSource);
 
   signBundle();
-  createDmg();
+  if (buildDmg) createDmg();
 
   log('');
   log(`完成：${appPath}`);
-  log(`安装镜像：${dmgPath}`);
-  log('把 .app 拖进“应用程序”即可使用；首次打开若被拦截，请右键 → 打开。');
+  if (buildDmg) {
+    log(`安装镜像：${dmgPath}`);
+    log('把 .app 拖进“应用程序”即可使用；首次打开若被拦截，请右键 → 打开。');
+  } else {
+    log('未生成 DMG；需要安装镜像时执行 npm run build:dmg');
+  }
 }
 
 main();

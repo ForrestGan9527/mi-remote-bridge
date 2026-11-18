@@ -232,6 +232,7 @@
     systemInstall: document.getElementById('systemInstall'),
     systemInstallState: document.getElementById('systemInstallState'),
     copyCoreaudiodCommand: document.getElementById('copyCoreaudiodCommand'),
+    copyDoubaoCommand: document.getElementById('copyDoubaoCommand'),
     copyBlackholeCommand: document.getElementById('copyBlackholeCommand'),
     redetectAudioButton: document.getElementById('redetectAudioButton'),
     systemAccessibility: document.getElementById('systemAccessibility'),
@@ -3399,6 +3400,9 @@
     });
     dom.copyCoreaudiodCommand.addEventListener('click', () => {
       copyText('sudo killall coreaudiod', '已复制重启音频服务命令');
+    });
+    dom.copyDoubaoCommand.addEventListener('click', () => {
+      copyText('brew install --cask doubaoime', '已复制豆包输入法安装命令');
     });
     dom.redetectAudioButton.addEventListener('click', () => {
       if (!sendJson({ type: 'system-refresh' })) {

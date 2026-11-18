@@ -10,7 +10,8 @@
     "test": "node --test",
     "build:native": "node scripts/build-native.js",
     "build:mac": "node scripts/build-mac.js",
-    "fix:permissions": "tccutil reset Accessibility com.remotebridge.mac || true; tccutil reset Accessibility com.remotebridge.helper || true; tccutil reset Accessibility com.remotebridge.node || true; tccutil reset Microphone com.remotebridge.mac || true; tccutil reset Microphone com.remotebridge.helper || true"
+    "fix:permissions": "tccutil reset Accessibility com.remotebridge.mac || true; tccutil reset Accessibility com.remotebridge.helper || true; tccutil reset Accessibility com.remotebridge.node || true; tccutil reset Microphone com.remotebridge.mac || true; tccutil reset Microphone com.remotebridge.helper || true",
+    "build:dmg": "node scripts/build-mac.js --dmg"
   },
   "keywords": [
     "remote",

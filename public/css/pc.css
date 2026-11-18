@@ -2470,7 +2470,8 @@ body.drawer-open {
   margin-top: 0;
 }
 
-.system-install-state {
+.system-install-state,
+.system-install-hint {
   color: var(--muted-deep) !important;
 }
 

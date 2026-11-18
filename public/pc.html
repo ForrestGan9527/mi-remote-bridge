@@ -196,6 +196,24 @@
                 </div>
               </div>
             </details>
+            <details class="system-install system-install--ime" id="doubaoInstall">
+              <summary class="system-install-summary">
+                <span>语音输入工具 · 推荐安装豆包输入法</span>
+                <span class="system-install-chevron" aria-hidden="true"></span>
+              </summary>
+              <div class="system-install-body">
+                <p>虚拟声卡负责把手机语音送进 Mac；还需要一个语音输入工具把声音转成文字。推荐豆包输入法，它支持按住 <code>Fn</code> 进行语音输入。</p>
+                <p><strong>方式一 · Homebrew</strong></p>
+                <p><code>brew install --cask doubaoime</code></p>
+                <p><strong>方式二 · 官方下载</strong>：点击下方「下载豆包输入法」。</p>
+                <p>安装后：在系统设置 → 键盘 → 文本输入 → 输入法中启用豆包输入法；把豆包的语音快捷键设为 <code>Fn</code>，麦克风设为已选择的虚拟声卡；电脑端「语音触发」也选择 <code>Fn</code>。然后按住手机语音键即可。</p>
+                <div class="system-install-actions">
+                  <a class="system-install-link" id="doubaoDownloadLink" href="https://shurufa.doubao.com/pc" target="_blank" rel="noopener noreferrer">下载豆包输入法</a>
+                  <button class="system-install-button" id="copyDoubaoCommand" type="button">复制 Homebrew 命令</button>
+                </div>
+                <p class="system-install-hint">豆包输入法为第三方软件；也可以使用 Typeless 等其它支持虚拟麦克风和 Fn 触发的语音输入工具。</p>
+              </div>
+            </details>
             <div class="system-row">
               <span class="system-row-label">辅助功能</span>
               <span class="system-row-value" id="systemAccessibility">未检测</span>

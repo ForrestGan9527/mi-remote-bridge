@@ -83,19 +83,23 @@ HTTP 备用    http://192.168.1.100:3000/?pair=...
 在 macOS 开发机上执行：
 
 ```bash
+# 只生成 .app（默认）
 npm run build:mac
+
+# 需要安装镜像时再生成 DMG
+npm run build:dmg
 ```
 
-会生成：
+输出：
 
 - `dist/Remote Bridge.app` — 可直接运行的菜单栏应用
-- `dist/RemoteBridge-<版本>.dmg` — 拖入「应用程序」即可安装的镜像
+- `dist/RemoteBridge-<版本>.dmg` — 仅执行 `build:dmg` 时生成，可拖入「应用程序」安装
 
 产物已经包含 Node 运行时、服务端、网页界面和预编译的 `RemoteBridgeHelper`，目标 Mac 不需要再安装 Node、Swift 或 Xcode。首次运行仍需要安装 `MiRemoteV 2ch` / `SayAll` / `BlackHole` 之一作为虚拟麦克风。
 
 安装与使用：
 
-1. 打开 DMG，把 **Remote Bridge.app** 拖到「应用程序」。
+1. 直接把 **Remote Bridge.app** 拖到「应用程序」；如果生成了 DMG，也可以打开 DMG 后拖入。
 2. 首次打开如果被 Gatekeeper 拦截，右键点击应用 → **打开**。当前使用 `.signing/` 中的本地自签名身份，没有做 Apple 公证。
 3. 菜单栏会出现遥控器图标，服务自动启动并打开 `http://localhost:3000/pc`。
 4. 菜单里可以打开遥控台、重启服务、查看日志或退出。退出应用会同时停止后台服务。
@@ -276,6 +280,25 @@ MiRemoteV 2ch / SayAll / BlackHole 2ch
 系统桥接卡片始终显示「虚拟声卡需要单独安装 · BlackHole 2ch」折叠说明，展开后可查看官方下载链接、Homebrew 命令、重启音频服务命令和安装步骤。
 
 安装 BlackHole 后，在电脑端点击「重新检测」，下拉框中就会出现 `BlackHole 2ch`；选中即可体验。普通扬声器不会出现在这个下拉框中。
+
+### 安装豆包输入法（语音转文字）
+
+虚拟声卡只负责把手机语音送进 Mac；如果希望「按住说话 → 自动变成文字」，还需要 Mac 上的语音输入工具。推荐豆包输入法，它支持按住 `Fn` 进行语音输入：
+
+- 官方下载：<https://shurufa.doubao.com/pc>
+- Homebrew：
+  ```bash
+  brew install --cask doubaoime
+  ```
+
+安装后：
+
+1. 在「系统设置 → 键盘 → 文本输入 → 输入法」中添加豆包输入法；
+2. 在豆包输入法设置中把语音快捷键设为 `Fn`，麦克风设为当前虚拟声卡（如 `BlackHole 2ch`）；
+3. 电脑端「系统桥接 → 语音触发」也选择 `Fn`；
+4. 按住手机语音键开始说话，松开后停止，豆包会把语音转成文字输入到当前焦点输入框。
+
+豆包输入法为第三方软件，本项目不附带。也可以使用 Typeless 等其它支持虚拟麦克风和 `Fn` 触发的语音输入工具。
 
 ## HTTPS 与手机麦克风
 
