@@ -873,6 +873,12 @@ a {
   padding-top: 2px;
 }
 
+.recognition-mode-select {
+  width: 128px;
+  height: 30px;
+  font-size: 9px;
+}
+
 .voice-status {
   min-height: 30px;
   padding: 0 10px;

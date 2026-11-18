@@ -1213,6 +1213,7 @@ let textCapture = TextCapture()
 var selectedDevice: AudioDeviceInfo?
 var voiceTrigger = "fn"
 var voiceTriggerShortcut: [String: Any]?
+var captureTextEnabled = true
 var preferredDeviceName: String? = ProcessInfo.processInfo.environment["SYSTEM_AUDIO_DEVICE"]
 
 func currentStatus() -> [String: Any] {
@@ -1233,6 +1234,7 @@ func currentStatus() -> [String: Any] {
         "voiceTrigger": voiceTrigger,
         "voiceTriggerShortcut": voiceTriggerShortcut ?? NSNull(),
         "active": output.isActive,
+        "captureTextEnabled": captureTextEnabled,
         "frontmostApp": frontmost?.localizedName ?? "",
         "frontmostBundleId": frontmost?.bundleIdentifier ?? "",
         "secureInput": IsSecureEventInputEnabled(),
@@ -1325,6 +1327,27 @@ func handle(_ command: [String: Any]) {
         sendStatus()
         return
 
+    case "set-capture-text":
+        captureTextEnabled = (command["enabled"] as? Bool) ?? true
+        if !captureTextEnabled {
+            textCapture.cancel()
+        }
+        sendStatus()
+        return
+
+    case "copy-text":
+        guard let text = command["text"] as? String, !text.isEmpty else {
+            return
+        }
+        let limited = String(text.prefix(4000))
+        DispatchQueue.main.async {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(limited, forType: .string)
+        }
+        emit(["type": "captured-text", "text": limited])
+        return
+
     case "audio-start":
         guard let device = selectedDevice ?? findVirtualDevice(preferredName: preferredDeviceName) else {
             emitError("没有可用的虚拟音频设备", code: "virtual_device_missing")
@@ -1339,7 +1362,11 @@ func handle(_ command: [String: Any]) {
             emitError(started.1, code: "audio_start_failed")
             return
         }
-        textCapture.begin()
+        if captureTextEnabled {
+            textCapture.begin()
+        } else {
+            textCapture.cancel()
+        }
         keys.pressVoiceTrigger(trigger)
         emit([
             "type": "audio-started",
@@ -1362,7 +1389,11 @@ func handle(_ command: [String: Any]) {
         output.finish {
             commandQueue.async {
                 keys.releaseVoiceTrigger()
-                textCapture.finish()
+                if captureTextEnabled {
+                    textCapture.finish()
+                } else {
+                    textCapture.cancel()
+                }
                 emit(["type": "audio-ended"])
             }
         }

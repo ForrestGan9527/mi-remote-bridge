@@ -176,6 +176,7 @@
     lastKeyAt: 0,
     lastKey: null,
     latestTranscript: '',
+    recognitionMode: 'mac',
     voices: new Map(),
     voiceOrder: [],
     activeVoiceId: null,
@@ -225,6 +226,7 @@
     liveTranscript: document.getElementById('liveTranscript'),
     waveBars: document.getElementById('waveBars'),
     voiceHistory: document.getElementById('voiceHistory'),
+    recognitionModeSelect: document.getElementById('recognitionModeSelect'),
     voiceHistoryCount: document.getElementById('voiceHistoryCount'),
     autoplayToggle: document.getElementById('autoplayToggle'),
     copyTranscriptButton: document.getElementById('copyTranscriptButton'),
@@ -329,6 +331,8 @@
     voiceEmptyMarkup = dom.voiceHistory.innerHTML;
     state.config = fallbackConfig();
     state.draft = clone(state.config);
+    state.recognitionMode = readRecognitionMode();
+    dom.recognitionModeSelect.value = state.recognitionMode;
     state.autoplay = readAutoplayPreference();
     updateAutoplayButton();
     buildWaveBars();
@@ -485,6 +489,10 @@
     switch (message.type) {
       case 'ready':
         state.ready = true;
+        sendJson({
+          type: 'system-set-capture-text',
+          enabled: state.recognitionMode === 'mac'
+        });
         if (message.config) applyServerConfig(message.config);
         applySystemStatus(message.system || {
           supported: false,
@@ -1191,6 +1199,37 @@
     if (entry.published) updatePublishedVoiceText(entry);
   }
 
+  function readRecognitionMode() {
+    try {
+      return localStorage.getItem('remoteBridge.recognitionMode') === 'phone' ? 'phone' : 'mac';
+    } catch {
+      return 'mac';
+    }
+  }
+
+  function applyRecognitionMode(mode) {
+    state.recognitionMode = mode === 'phone' ? 'phone' : 'mac';
+    dom.recognitionModeSelect.value = state.recognitionMode;
+    try {
+      localStorage.setItem('remoteBridge.recognitionMode', state.recognitionMode);
+    } catch {
+      // Storage is optional.
+    }
+    sendJson({
+      type: 'system-set-capture-text',
+      enabled: state.recognitionMode === 'mac'
+    });
+  }
+
+  function maybeCopyPhoneTranscript(entry) {
+    if (state.recognitionMode !== 'phone' || entry.source === 'file') return;
+    const text = (entry.transcript || '').trim();
+    if (!text) return;
+    if (!sendJson({ type: 'system-copy-text', text })) {
+      showToast('服务未连接，无法复制手机识别文字', true);
+    }
+  }
+
   function handleVoiceEnd(message) {
     if (!isValidVoiceId(message.id)) return;
     let entry = state.voices.get(message.id);
@@ -1235,6 +1274,7 @@
       : null;
     if (entry.source === 'file') entry.durationMs = null;
 
+    maybeCopyPhoneTranscript(entry);
     finishVoice(entry, {
       cancelled: Boolean(message.cancelled),
       reason: message.reason || null
@@ -3660,6 +3700,13 @@
     document.addEventListener('keydown', handleDesignerKeydown);
 
     dom.voiceHistory.addEventListener('click', handleVoiceHistoryClick);
+    dom.recognitionModeSelect.addEventListener('change', () => {
+      const mode = dom.recognitionModeSelect.value === 'phone' ? 'phone' : 'mac';
+      applyRecognitionMode(mode);
+      showToast(mode === 'phone'
+        ? '已切换为手机网页识别：松开语音键后自动复制识别文字'
+        : '已切换为 Mac 豆包识别：需要 Mac 前台输入框保持焦点');
+    });
     dom.autoplayToggle.addEventListener('click', toggleAutoplay);
     dom.copyTranscriptButton.addEventListener('click', () => {
       if (!state.latestTranscript) {

@@ -116,6 +116,10 @@
               <p>手机端按住语音键，录音与实时转写会传到这里。</p>
             </div>
             <div class="voice-tools">
+              <select class="config-select recognition-mode-select" id="recognitionModeSelect" aria-label="语音识别来源" title="Mac 豆包：从 Mac 前台输入框提取；手机网页：使用手机浏览器识别，不需要 Mac 焦点">
+                <option value="mac">识别：Mac 豆包</option>
+                <option value="phone">识别：手机网页</option>
+              </select>
               <div class="voice-status" id="voiceStatus">
                 <span class="voice-status-dot"></span>
                 <span id="voiceStatusText">等待语音</span>
