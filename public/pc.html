@@ -268,9 +268,10 @@
 
           <p class="connect-note" id="connectNote">手机与电脑连接同一个 Wi-Fi 或蓝牙网络，然后扫描二维码。</p>
 
-          <div class="connect-address" id="connectAddressRow" hidden>
+          <div class="connect-address" id="connectAddressRow">
             <span>连接地址</span>
             <select class="config-select connect-address-select" id="connectAddressSelect" aria-label="选择手机连接地址"></select>
+            <button class="text-button connect-refresh" id="refreshConnectInfoButton" type="button">刷新</button>
           </div>
 
           <details class="connect-bluetooth" id="bluetoothConnectGuide">
@@ -285,6 +286,7 @@
                 <li>回到本页，在「连接地址」下拉框选择蓝牙 / PAN 地址，再扫描上方二维码。</li>
               </ol>
               <p class="connect-bluetooth-note">蓝牙网络适合按键控制；语音 PCM 带宽较高，建议语音仍使用 Wi-Fi。连接蓝牙网络后启动 Remote Bridge，HTTPS 证书会包含新的蓝牙 IP。</p>
+              <p class="connect-bluetooth-note">如果「连接地址」里还没有蓝牙地址，说明 Mac 还没有获得蓝牙网络 IP；完成上面的网络共享后，点击「刷新」。</p>
             </div>
           </details>
 

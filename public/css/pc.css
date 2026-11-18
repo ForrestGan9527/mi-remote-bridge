@@ -1382,6 +1382,16 @@ a {
   font-size: 9px;
 }
 
+.connect-address-select:disabled {
+  opacity: 0.7;
+}
+
+.connect-refresh {
+  flex: none;
+  color: var(--accent-light);
+  font-size: 8.5px;
+}
+
 .connect-bluetooth {
   margin-top: 9px;
   border: 1px solid var(--line);

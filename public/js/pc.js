@@ -255,6 +255,7 @@
     connectUrl: document.getElementById('connectUrl'),
     connectAddressRow: document.getElementById('connectAddressRow'),
     connectAddressSelect: document.getElementById('connectAddressSelect'),
+    refreshConnectInfoButton: document.getElementById('refreshConnectInfoButton'),
     securityBadge: document.getElementById('securityBadge'),
     qrImage: document.getElementById('qrImage'),
     qrLoading: document.getElementById('qrLoading'),
@@ -3348,20 +3349,17 @@
     let selected = endpoints.find((endpoint) => endpoint.address === previousAddress);
     if (!selected) selected = endpoints[0];
 
-    const showSelect = endpoints.length > 1;
-    dom.connectAddressRow.hidden = !showSelect;
-    if (showSelect) {
-      const fragment = document.createDocumentFragment();
-      endpoints.forEach((endpoint, index) => {
-        const option = document.createElement('option');
-        option.value = String(index);
-        const kind = endpoint.bluetooth ? '蓝牙' : endpoint.label;
-        option.textContent = `${kind} · ${endpoint.address}`;
-        fragment.appendChild(option);
-      });
-      dom.connectAddressSelect.replaceChildren(fragment);
-      dom.connectAddressSelect.value = String(endpoints.indexOf(selected));
-    }
+    const fragment = document.createDocumentFragment();
+    endpoints.forEach((endpoint, index) => {
+      const option = document.createElement('option');
+      option.value = String(index);
+      const kind = endpoint.bluetooth ? '蓝牙' : endpoint.label;
+      option.textContent = `${kind} · ${endpoint.address}`;
+      fragment.appendChild(option);
+    });
+    dom.connectAddressSelect.replaceChildren(fragment);
+    dom.connectAddressSelect.value = String(endpoints.indexOf(selected));
+    dom.connectAddressSelect.disabled = endpoints.length <= 1;
 
     applyConnectEndpoint(info, selected);
   }
@@ -3494,6 +3492,10 @@
 
     dom.copyUrlButton.addEventListener('click', () => {
       copyText(state.connectEndpoint?.primaryUrl, '已复制手机端地址');
+    });
+    dom.refreshConnectInfoButton.addEventListener('click', () => {
+      showToast('正在刷新连接地址…');
+      void loadConnectInfo();
     });
     dom.connectAddressSelect.addEventListener('change', () => {
       const endpoints = state.connectInfo?.endpoints || [];
