@@ -345,18 +345,21 @@ final class TextCapture {
     private var lastChangeAt = Date()
     private var startedAt = Date()
     private var timer: DispatchSourceTimer?
+    private var copiedText = ""
 
     func begin() {
         cancel()
         element = axFocusedTextElement()
         beforeValue = element.flatMap(axReadText) ?? ""
         lastValue = beforeValue
+        copiedText = ""
         startedAt = Date()
         lastChangeAt = startedAt
     }
 
     func finish() {
         guard element != nil else { return }
+        copiedText = ""
         startedAt = Date()
         lastChangeAt = Date()
         let source = DispatchSource.makeTimerSource(queue: queue)
@@ -374,6 +377,7 @@ final class TextCapture {
         element = nil
         beforeValue = ""
         lastValue = ""
+        copiedText = ""
     }
 
     private func poll() {
@@ -389,18 +393,24 @@ final class TextCapture {
         let stableFor = now.timeIntervalSince(lastChangeAt)
         let elapsed = now.timeIntervalSince(startedAt)
         if lastValue == beforeValue {
-            if elapsed > 12 { cancel() }
+            if elapsed > 20 { cancel() }
             return
         }
-        if stableFor < 1.2 && elapsed < 12 {
+        if stableFor >= 2.5 || elapsed >= 20 {
+            let text = insertedText(before: beforeValue, after: lastValue) ?? ""
+            if !text.isEmpty && text != copiedText {
+                copiedText = text
+                copyToClipboard(text)
+                emit(["type": "captured-text", "text": text])
+            }
+        }
+        if !copiedText.isEmpty && now.timeIntervalSince(lastChangeAt) > 3.0 {
+            cancel()
             return
         }
-        let text = insertedText(before: beforeValue, after: lastValue) ?? ""
-        if !text.isEmpty {
-            copyToClipboard(text)
-            emit(["type": "captured-text", "text": text])
+        if elapsed > 20 {
+            cancel()
         }
-        cancel()
     }
 
     private func copyToClipboard(_ text: String) {
