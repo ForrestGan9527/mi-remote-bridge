@@ -1,0 +1,33 @@
+{
+  "name": "mi-remote-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web remote with live voice routing into a macOS virtual microphone and configurable system shortcuts",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test",
+    "build:native": "node scripts/build-native.js",
+    "build:mac": "node scripts/build-mac.js",
+    "fix:permissions": "tccutil reset Accessibility com.remotebridge.mac || true; tccutil reset Accessibility com.remotebridge.helper || true; tccutil reset Accessibility com.remotebridge.node || true; tccutil reset Microphone com.remotebridge.mac || true; tccutil reset Microphone com.remotebridge.helper || true"
+  },
+  "keywords": [
+    "remote",
+    "websocket",
+    "voice",
+    "xiaomi",
+    "macos",
+    "microphone"
+  ],
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.3.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.23.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

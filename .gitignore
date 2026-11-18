@@ -1,0 +1,10 @@
+node_modules/
+data/config.json
+certs/*.pem
+certs/*.cnf
+certs/meta.json
+.DS_Store
+npm-debug.log*
+native/.build/
+dist/
+.signing/

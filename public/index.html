@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0f11">
+  <meta name="format-detection" content="telephone=no">
+  <title>遥控 · 手机端</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/css/phone.css">
+</head>
+<body>
+  <div class="ambient-arc" aria-hidden="true"></div>
+
+  <div class="stage">
+    <header class="page-status">
+      <div class="connection is-connecting" id="connection" role="status" aria-live="polite">
+        <span class="connection-main">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span id="connectionText">正在连接</span>
+        </span>
+        <span class="connection-sub" id="connectionSub">正在连接电脑</span>
+      </div>
+    </header>
+
+    <main class="remote-shell" aria-labelledby="pageTitle">
+      <h1 class="visually-hidden" id="pageTitle">手机遥控器</h1>
+
+      <div class="remote-top">
+        <span class="remote-signature" aria-hidden="true"><i></i>REMOTE</span>
+        <button class="outline-key help-outline" id="helpButton" type="button" aria-label="遥控说明" title="遥控说明">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+            <path d="M4 7h6M16 7h4M4 17h4M14 17h6"/>
+            <circle cx="13" cy="7" r="3"/>
+            <circle cx="11" cy="17" r="3"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="key-grid" id="keyGrid" role="group" aria-label="遥控按键"></div>
+    </main>
+
+    <footer class="phone-footer">
+      <div class="footer-hint-row">
+        <p class="remote-hint" id="voiceHint">按住麦克风键说话 · 松开即发送</p>
+      </div>
+      <div class="last-event" id="lastEvent">
+        <span class="last-event-dot" aria-hidden="true"></span>
+        <span id="lastEventText"></span>
+      </div>
+      <p class="secure-note" id="secureNote" hidden></p>
+    </footer>
+  </div>
+
+  <section class="voice-overlay" id="voiceOverlay" hidden>
+    <div class="voice-overlay-head">
+      <span class="recording-pill"><span class="recording-dot" aria-hidden="true"></span>正在录音</span>
+      <span class="voice-timer" id="voiceTimer">00:00</span>
+    </div>
+    <div class="voice-wave" id="voiceWave" aria-hidden="true"></div>
+    <p class="voice-transcript" id="voiceLiveTranscript">开始说话…</p>
+    <p class="voice-release-hint">松开按钮即发送</p>
+  </section>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <div class="modal" id="voiceModal" hidden>
+    <div class="modal-backdrop" data-close-modal></div>
+    <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="voiceModalTitle" aria-describedby="voiceModalBody">
+      <div class="modal-icon" id="modalIcon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="3" width="6" height="11" rx="3"/>
+          <path d="M5.8 11.2a6.2 6.2 0 0 0 12.4 0M12 17.4V21"/>
+          <path d="m3 3 18 18"/>
+        </svg>
+      </div>
+      <h2 id="voiceModalTitle">暂时无法录音</h2>
+      <p id="voiceModalBody"></p>
+      <div class="modal-actions">
+        <button class="button button-secondary" id="modalCloseButton" type="button">知道了</button>
+        <button class="button button-primary" id="uploadAudioButton" type="button" hidden>上传录音</button>
+      </div>
+    </section>
+  </div>
+
+  <input type="file" id="audioFileInput" accept="audio/*" hidden>
+  <script src="/js/phone.js"></script>
+</body>
+</html>
