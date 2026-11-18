@@ -2410,6 +2410,13 @@ body.drawer-open {
   font-size: 8.5px;
 }
 
+.system-device-select {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  font-size: 9px;
+}
+
 .system-install {
   padding: 10px 11px;
   border-radius: 11px;

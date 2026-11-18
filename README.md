@@ -258,13 +258,22 @@ MiRemoteV 2ch / SayAll / BlackHole 2ch
 
 ### 选择虚拟麦克风
 
-本机桥接按名称自动选择设备，优先级：
+电脑端「系统桥接 → 虚拟麦克风」会列出检测到的虚拟声卡，可以直接在下拉框里切换，例如：
+
+- `MiRemoteV 2ch`
+- `SayAll`
+- `BlackHole 2ch`
+- 其它名称中包含 Loopback / Virtual 的虚拟音频设备
+
+选择后会立即切换，并写入配置持久保存；重启应用后仍使用该设备。
+
+如果没有手动选择，本机桥接按以下优先级自动选择：
 
 1. 环境变量 `SYSTEM_AUDIO_DEVICE` 指定的名称
 2. `MiRemoteV` / `SayAll`
 3. `BlackHole`
 
-你的机器目前检测到 `MiRemoteV 2ch` 时，系统桥接会优先使用它。普通扬声器不会被当作麦克风。
+安装 BlackHole 后，在电脑端点击「重新检测」，下拉框中就会出现 `BlackHole 2ch`；选中即可体验。普通扬声器不会出现在这个下拉框中。
 
 ## HTTPS 与手机麦克风
 

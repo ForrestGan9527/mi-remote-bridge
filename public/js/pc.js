@@ -228,6 +228,7 @@
     systemPanel: document.getElementById('systemPanel'),
     systemBadge: document.getElementById('systemBadge'),
     systemDevice: document.getElementById('systemDevice'),
+    systemDeviceSelect: document.getElementById('systemDeviceSelect'),
     systemInstall: document.getElementById('systemInstall'),
     copyBlackholeCommand: document.getElementById('copyBlackholeCommand'),
     redetectAudioButton: document.getElementById('redetectAudioButton'),
@@ -759,11 +760,38 @@
     }
   }
 
+  const VIRTUAL_AUDIO_PATTERN = /MiRemoteV|SayAll|BlackHole|Loopback|Soundflower|VB[- ]?Cable|Virtual|虚拟/i;
+
+  function getVirtualAudioDevices(status) {
+    const devices = Array.isArray(status?.devices) ? status.devices : [];
+    const result = devices.filter((device) => {
+      if (!device || typeof device.name !== 'string') return false;
+      return VIRTUAL_AUDIO_PATTERN.test(device.name)
+        || VIRTUAL_AUDIO_PATTERN.test(device.uid || '');
+    });
+    if (
+      status?.device
+      && !result.some((device) => (
+        (device.uid && device.uid === status.deviceUID) || device.name === status.device
+      ))
+    ) {
+      result.unshift({
+        id: null,
+        name: status.device,
+        uid: status.deviceUID || status.device,
+        outputChannels: status.outputChannels || 0
+      });
+    }
+    return result;
+  }
+
   function updateSystemCard() {
     const status = state.system;
     if (!status) {
       dom.systemBadge.textContent = '未连接';
+      dom.systemDevice.hidden = false;
       dom.systemDevice.textContent = '正在检测…';
+      dom.systemDeviceSelect.hidden = true;
       dom.systemAccessibility.textContent = '未检测';
       dom.systemTarget.textContent = '未检测';
       dom.systemSecureInput.textContent = '未检测';
@@ -788,9 +816,39 @@
     else if (!available && !preparing) dom.systemBadge.classList.add('is-http');
     dom.systemBadge.textContent = badge;
 
-    dom.systemDevice.textContent = status.device || '未检测到虚拟麦克风';
-    dom.systemDevice.classList.toggle('is-missing', !status.device);
-    dom.systemInstall.hidden = Boolean(status.device) || preparing || !status.helperReady;
+    const virtualDevices = getVirtualAudioDevices(status);
+    const hasVirtualDevices = virtualDevices.length > 0;
+    dom.systemDevice.hidden = hasVirtualDevices;
+    dom.systemDeviceSelect.hidden = !hasVirtualDevices;
+    dom.systemDevice.textContent = '未检测到虚拟麦克风';
+    dom.systemDevice.classList.toggle('is-missing', true);
+
+    if (hasVirtualDevices) {
+      const signature = virtualDevices
+        .map((device) => `${device.uid || device.name}\u0000${device.name}`)
+        .join('|');
+      if (dom.systemDeviceSelect.dataset.signature !== signature) {
+        const fragment = document.createDocumentFragment();
+        for (const device of virtualDevices) {
+          const option = document.createElement('option');
+          option.value = device.uid || device.name;
+          option.textContent = device.name;
+          fragment.appendChild(option);
+        }
+        dom.systemDeviceSelect.replaceChildren(fragment);
+        dom.systemDeviceSelect.dataset.signature = signature;
+      }
+      const selectedValue = status.deviceUID
+        || virtualDevices.find((device) => device.name === status.device)?.uid
+        || status.device
+        || '';
+      if (selectedValue && dom.systemDeviceSelect.value !== selectedValue) {
+        dom.systemDeviceSelect.value = selectedValue;
+      }
+      dom.systemDeviceSelect.disabled = !serviceConnected || !status.helperReady;
+    }
+
+    dom.systemInstall.hidden = hasVirtualDevices || preparing || !status.helperReady;
 
     dom.systemAccessibility.textContent = status.accessibility ? '已授权' : '未授权';
     dom.systemAccessibility.classList.toggle('is-ok', Boolean(status.accessibility));
@@ -3311,6 +3369,15 @@
         showToast('正在重新检测系统桥接');
       }
     });
+    dom.systemDeviceSelect.addEventListener('change', () => {
+      const device = dom.systemDeviceSelect.value;
+      if (!device) return;
+      if (!sendJson({ type: 'system-select-device', device })) {
+        showToast('服务未连接', true);
+      } else {
+        showToast('正在切换虚拟声卡…');
+      }
+    });
     dom.copyBlackholeCommand.addEventListener('click', () => {
       copyText('brew install blackhole-2ch', '已复制 BlackHole 安装命令');
     });
@@ -3505,6 +3572,7 @@
       revision: 0,
       updatedAt: null,
       voiceTrigger: 'fn',
+      audioDevice: '',
       layout: defaultPhoneLayout(),
       customKeys: [],
       hiddenKeys: [...DEFAULT_HIDDEN_KEYS],
@@ -3517,6 +3585,7 @@
     if (!config || typeof config !== 'object') return normalized;
     normalized.revision = Number.isInteger(config.revision) ? config.revision : 0;
     normalized.updatedAt = typeof config.updatedAt === 'string' ? config.updatedAt : null;
+    normalized.audioDevice = typeof config.audioDevice === 'string' ? config.audioDevice : '';
     if (['fn', 'rightOption', 'rightCommand', 'none'].includes(config.voiceTrigger)) {
       normalized.voiceTrigger = config.voiceTrigger;
     }

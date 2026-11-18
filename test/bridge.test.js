@@ -112,6 +112,7 @@ test('bridge server handles config, keys, voice, and presence', async (t) => {
       ]
     });
     assert.deepEqual(config.customKeys, []);
+    assert.equal(config.audioDevice, '');
     assert.deepEqual(config.hiddenKeys, [
       'power', 'home', 'menu', 'volup', 'voldown', 'mute'
     ]);
@@ -184,6 +185,7 @@ test('bridge server handles config, keys, voice, and presence', async (t) => {
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({
         voiceTrigger: 'rightOption',
+        audioDevice: 'BlackHole 2ch',
         layout: {
           left: ['voice', 'home', 'menu', 'back'],
           right: ['mute', 'delete']
@@ -223,6 +225,7 @@ test('bridge server handles config, keys, voice, and presence', async (t) => {
     });
     assert.deepEqual(updated.keys.ok.longAction, { type: 'focusInput' });
     assert.equal(updated.voiceTrigger, 'rightOption');
+    assert.equal(updated.audioDevice, 'BlackHole 2ch');
     assert.deepEqual(updated.layout, {
       columns: 2,
       order: [
@@ -240,6 +243,7 @@ test('bridge server handles config, keys, voice, and presence', async (t) => {
     const diskConfig = JSON.parse(fs.readFileSync(path.join(tempDir, 'config.json'), 'utf8'));
     assert.equal(diskConfig.keys.ok.label, '确认播放');
     assert.equal(diskConfig.voiceTrigger, 'rightOption');
+    assert.equal(diskConfig.audioDevice, 'BlackHole 2ch');
     assert.equal(diskConfig.keys.ok.action.code, 'KeyK');
     assert.equal(diskConfig.keys.ok.doubleAction.command, 'playPause');
     assert.equal(diskConfig.keys.ok.longAction.type, 'focusInput');
