@@ -266,7 +266,7 @@
             </div>
           </div>
 
-          <p class="connect-note" id="connectNote">手机与电脑连接同一个 Wi-Fi 或蓝牙网络，然后扫描二维码。</p>
+          <p class="connect-note" id="connectNote">手机与电脑连接同一个 Wi-Fi、USB 网络共享或蓝牙网络，然后扫描二维码。</p>
 
           <div class="connect-address" id="connectAddressRow">
             <span>连接地址</span>
@@ -276,17 +276,24 @@
 
           <details class="connect-bluetooth" id="bluetoothConnectGuide">
             <summary>
-              <span>没有 Wi-Fi？使用蓝牙网络连接</span>
+              <span>没有 Wi-Fi？USB 网络共享 / 蓝牙网络</span>
               <span class="connect-bluetooth-chevron" aria-hidden="true"></span>
             </summary>
             <div class="connect-bluetooth-body">
+              <p><strong>推荐：USB 网络共享</strong></p>
               <ol>
-                <li>Android：打开「设置 → 网络 → 热点与共享 → 蓝牙网络共享」；iPhone 可使用个人热点（USB / 蓝牙 / Wi-Fi）。</li>
-                <li>Mac：打开「系统设置 → 蓝牙」，与手机配对，并在网络设置中连接蓝牙 PAN / 热点。</li>
-                <li>回到本页，在「连接地址」下拉框选择蓝牙 / PAN 地址，再扫描上方二维码。</li>
+                <li>用数据线连接手机和 Mac；iPhone 打开「个人热点」，Android 打开「USB 网络共享」。</li>
+                <li>Mac 会出现新的网络接口（如 iPhone USB / Ethernet）。</li>
+                <li>回到本页点击「刷新」，在「连接地址」中选中新地址，再扫描二维码。USB 链路带宽足够语音使用。</li>
               </ol>
-              <p class="connect-bluetooth-note">蓝牙网络适合按键控制；语音 PCM 带宽较高，建议语音仍使用 Wi-Fi。连接蓝牙网络后启动 Remote Bridge，HTTPS 证书会包含新的蓝牙 IP。</p>
-              <p class="connect-bluetooth-note">如果「连接地址」里还没有蓝牙地址，说明 Mac 还没有获得蓝牙网络 IP；完成上面的网络共享后，点击「刷新」。</p>
+              <p><strong>蓝牙网络（仅当系统提供蓝牙 PAN 时）</strong></p>
+              <ol>
+                <li>Android：打开「蓝牙网络共享」；iPhone：个人热点中允许蓝牙连接。</li>
+                <li>Mac：系统设置 → 蓝牙配对手机；再在网络设置中连接蓝牙 PAN / 热点。</li>
+                <li>回到本页点击「刷新」，选择蓝牙 / PAN 地址。</li>
+              </ol>
+              <p class="connect-bluetooth-note">注意：macOS Monterey 及之后（包括当前 macOS 27）通常已不再提供蓝牙 PAN 网络共享。如果「系统设置 → 网络」里没有蓝牙 PAN 接口，请使用 USB 网络共享或手机热点，本页的地址选择同样适用。</p>
+              <p class="connect-bluetooth-note">蓝牙链路适合按键，语音 PCM 带宽较高，可能卡顿；语音建议使用 Wi-Fi 或 USB。</p>
             </div>
           </details>
 
