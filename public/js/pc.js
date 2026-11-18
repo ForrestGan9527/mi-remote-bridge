@@ -1224,7 +1224,12 @@
   function maybeCopyPhoneTranscript(entry) {
     if (state.recognitionMode !== 'phone' || entry.source === 'file') return;
     const text = (entry.transcript || '').trim();
-    if (!text) return;
+    if (!text) {
+      sendJson({ type: 'system-clear-text' });
+      addFeed('system', '手机未返回识别文字', '请确认手机浏览器支持语音识别，或改用 Mac 豆包模式');
+      showToast('手机浏览器没有返回识别文字，剪贴板已清空', true);
+      return;
+    }
     if (!sendJson({ type: 'system-copy-text', text })) {
       showToast('服务未连接，无法复制手机识别文字', true);
     }

@@ -1335,6 +1335,12 @@ func handle(_ command: [String: Any]) {
         sendStatus()
         return
 
+    case "clear-text":
+        DispatchQueue.main.async {
+            NSPasteboard.general.clearContents()
+        }
+        return
+
     case "copy-text":
         guard let text = command["text"] as? String, !text.isEmpty else {
             return
