@@ -1709,6 +1709,25 @@ a {
   line-height: 1.6;
 }
 
+.config-gesture-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 9px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px dashed var(--line);
+  color: var(--muted-deep);
+  font-size: 8.5px;
+}
+
+.config-gesture-hint .text-button {
+  flex: none;
+  color: var(--accent-light);
+  font-size: 8.5px;
+}
+
 .config-list {
   margin-top: 6px;
 }

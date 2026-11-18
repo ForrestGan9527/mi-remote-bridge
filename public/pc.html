@@ -329,10 +329,10 @@
     <header class="drawer-head">
       <div>
         <span class="eyebrow">KEY MAPPINGS</span>
-        <h2 id="configTitle">按键设置</h2>
-        <p>设置每个按键在电脑端显示的名称与含义。</p>
+        <h2 id="configTitle">默认按键设置</h2>
+        <p>设置遥控器上可见默认按键的名称、含义和单击动作；自定义按键与双击/长按动作在设计遥控器中配置。</p>
       </div>
-      <button class="close-button" id="closeConfigButton" type="button" aria-label="关闭按键设置">
+      <button class="close-button" id="closeConfigButton" type="button" aria-label="关闭默认按键设置">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
           <path d="m6 6 12 12M18 6 6 18"/>
         </svg>
@@ -345,7 +345,11 @@
           <circle cx="12" cy="12" r="9"/>
           <path d="M12 11v5M12 8h.01"/>
         </svg>
-        <p>手机端按键图标保持不变。保存后，新含义会同步到接收端与手机提示中。启用系统桥接后，这里设置的电脑动作会真实执行。</p>
+        <p>这里显示当前遥控器上可见的默认按键；自定义按键在「设计遥控器」中编辑。保存后名称和含义会同步到接收端与手机提示。</p>
+      </div>
+      <div class="config-gesture-hint">
+        <span>单击 / 双击 / 长按动作</span>
+        <button class="text-button" id="openGestureEditorButton" type="button">在设计遥控器中设置 →</button>
       </div>
       <div class="config-global-row">
         <div class="config-global-copy">

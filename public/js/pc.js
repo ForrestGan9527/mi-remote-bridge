@@ -296,6 +296,7 @@
     drawerBackdrop: document.getElementById('drawerBackdrop'),
     closeConfigButton: document.getElementById('closeConfigButton'),
     configList: document.getElementById('configList'),
+    openGestureEditorButton: document.getElementById('openGestureEditorButton'),
     configStatus: document.getElementById('configStatus'),
     revertConfigButton: document.getElementById('revertConfigButton'),
     saveConfigButton: document.getElementById('saveConfigButton'),
@@ -1646,10 +1647,22 @@
     return dom.configDrawer.classList.contains('is-open');
   }
 
+  function configVisibleKeys() {
+    const hidden = new Set(normalizeHiddenKeys(state.config?.hiddenKeys));
+    const order = Array.isArray(state.config?.layout?.order)
+      ? state.config.layout.order
+      : KEY_ORDER;
+    const ids = order.filter((id) => KEY_ORDER.includes(id) && !hidden.has(id));
+    for (const id of KEY_ORDER) {
+      if (!hidden.has(id) && !ids.includes(id)) ids.push(id);
+    }
+    return ids;
+  }
+
   function renderConfigRows() {
     const fragment = document.createDocumentFragment();
 
-    for (const id of KEY_ORDER) {
+    for (const id of configVisibleKeys()) {
       const info = state.draft?.keys?.[id] || FALLBACK_KEYS[id];
       const row = document.createElement('div');
       row.className = 'config-row';
@@ -1697,7 +1710,7 @@
 
     const label = document.createElement('span');
     label.className = 'config-action-label';
-    label.textContent = '电脑动作';
+    label.textContent = '单击动作';
 
     if (id === 'voice') {
       const note = document.createElement('span');
@@ -1713,7 +1726,7 @@
     const select = document.createElement('select');
     select.className = 'config-select config-action-select';
     select.dataset.actionSelect = '';
-    select.setAttribute('aria-label', '电脑动作');
+    select.setAttribute('aria-label', '单击动作');
     for (const optionInfo of ACTION_OPTIONS) {
       const option = document.createElement('option');
       option.value = optionInfo.value;
@@ -2106,6 +2119,26 @@
       return CUSTOM_KEY_ICON;
     }
     return KEY_ICONS[keyId] || '';
+  }
+
+  function designerKeyInfo(keyId) {
+    const custom = state.designerDraftCustomKeys.find((entry) => entry.id === keyId);
+    if (custom) {
+      return {
+        label: custom.label || keyId,
+        meaning: custom.meaning || '自定义快捷键',
+        custom: true
+      };
+    }
+    return {
+      ...(state.config?.keys?.[keyId] || FALLBACK_KEYS[keyId] || { label: keyId, meaning: '' }),
+      custom: false
+    };
+  }
+
+  function remoteDesignerKeys() {
+    const hidden = new Set(state.designerDraftHiddenKeys);
+    return allLayoutKeys().filter((keyId) => !hidden.has(keyId));
   }
 
   function layoutColumns() {
@@ -2550,6 +2583,14 @@
         longAction: normalizeOptionalClientAction(entry.longAction)
       };
     }
+    for (const entry of config?.customKeys || []) {
+      if (!entry || typeof entry.id !== 'string') continue;
+      result[entry.id] = {
+        action: normalizeClientAction(entry.action, { type: 'none' }),
+        doubleAction: normalizeOptionalClientAction(entry.doubleAction),
+        longAction: normalizeOptionalClientAction(entry.longAction)
+      };
+    }
     return result;
   }
 
@@ -2588,8 +2629,16 @@
   function renderFunctionKeyList() {
     if (!dom.functionKeyList) return;
     const fragment = document.createDocumentFragment();
-    for (const id of KEY_ORDER) {
-      const info = state.config?.keys?.[id] || FALLBACK_KEYS[id] || { label: id };
+    const keyIds = remoteDesignerKeys();
+    if (keyIds.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'function-fixed-note';
+      empty.textContent = '当前遥控器上没有可见按键。请先在「布局」视图中显示按键。';
+      dom.functionKeyList.replaceChildren(empty);
+      return;
+    }
+    for (const id of keyIds) {
+      const info = designerKeyInfo(id);
       const card = document.createElement('div');
       card.className = 'function-key-card';
       card.dataset.functionKey = id;
@@ -2599,7 +2648,7 @@
       const icon = document.createElement('span');
       icon.className = 'function-key-icon';
       icon.setAttribute('aria-hidden', 'true');
-      icon.innerHTML = KEY_ICONS[id] || '';
+      icon.innerHTML = keyIconFor(id);
       const name = document.createElement('span');
       name.className = 'function-key-name';
       name.textContent = info.label || id;
@@ -2667,7 +2716,7 @@
       dom.functionEditor.hidden = true;
       return;
     }
-    const info = state.config?.keys?.[selection.key] || FALLBACK_KEYS[selection.key] || { label: selection.key };
+    const info = designerKeyInfo(selection.key);
     const gesture = FUNCTION_GESTURES.find((item) => item.id === selection.gesture);
     if (!gesture) {
       dom.functionEditor.hidden = true;
@@ -2710,6 +2759,14 @@
     dom.functionShortcutButton.classList.remove('is-capturing');
   }
 
+  function syncCustomGestureAction(key, gesture, action) {
+    if (gesture !== 'action') return;
+    const entry = state.designerDraftCustomKeys.find((item) => item.id === key);
+    if (!entry) return;
+    entry.action = action || { type: 'none' };
+    renderDesignerCustomKeys();
+  }
+
   function handleFunctionActionChange() {
     const selection = state.functionSelection;
     if (!selection || !state.designerGestureActions?.[selection.key]) return;
@@ -2731,6 +2788,7 @@
     }
 
     state.designerGestureActions[selection.key][selection.gesture] = action;
+    syncCustomGestureAction(selection.key, selection.gesture, action);
     renderFunctionKeyList();
     renderFunctionEditor();
     updateDesignerStatus();
@@ -2787,6 +2845,7 @@
       code: event.code,
       modifiers: MODIFIER_ORDER.filter((modifier) => modifiers.includes(modifier))
     };
+    syncCustomGestureAction(key, gesture, state.designerGestureActions[key][gesture]);
     renderFunctionKeyList();
     renderFunctionEditor();
     updateDesignerStatus();
@@ -2877,14 +2936,15 @@
 
       main.append(labelInput, placement);
 
+      const gestureAction = state.designerGestureActions?.[entry.id]?.action || entry.action;
       const shortcutButton = document.createElement('button');
       shortcutButton.type = 'button';
       shortcutButton.className = 'shortcut-button custom-key-shortcut';
       shortcutButton.dataset.customShortcutId = entry.id;
-      shortcutButton.textContent = entry.action?.type === 'keys' && entry.action.code
-        ? formatShortcut(entry.action)
+      shortcutButton.textContent = gestureAction?.type === 'keys' && gestureAction.code
+        ? formatShortcut(gestureAction)
         : '录制快捷键';
-      shortcutButton.classList.toggle('needs-recording', !(entry.action?.type === 'keys' && entry.action.code));
+      shortcutButton.classList.toggle('needs-recording', !(gestureAction?.type === 'keys' && gestureAction.code));
       shortcutButton.setAttribute('aria-label', `为 ${entry.label} 录制快捷键`);
 
       const removeButton = document.createElement('button');
@@ -2910,14 +2970,24 @@
       id: createCustomKeyId(),
       label: `快捷键 ${number}`,
       meaning: '自定义快捷键',
-      action: { type: 'none' }
+      action: { type: 'none' },
+      doubleAction: null,
+      longAction: null
     };
     state.designerDraftCustomKeys.push(entry);
+    if (state.designerGestureActions) {
+      state.designerGestureActions[entry.id] = {
+        action: { type: 'none' },
+        doubleAction: null,
+        longAction: null
+      };
+    }
     if (state.designerDraftLayout?.order) {
       state.designerDraftLayout.order.push(entry.id);
     }
     renderDesignerOrderList();
     renderDesignerCustomKeys();
+    renderFunctionKeyList();
     updateDesignerStatus();
     sendPreviewConfig();
     const inputs = dom.customKeyList.querySelectorAll('.custom-key-label-input');
@@ -2953,6 +3023,11 @@
     const index = state.designerDraftCustomKeys.findIndex((item) => item.id === id);
     if (index === -1) return;
     state.designerDraftCustomKeys.splice(index, 1);
+    if (state.designerGestureActions) delete state.designerGestureActions[id];
+    if (state.functionSelection?.key === id) {
+      state.functionSelection = null;
+      state.designerCapturingGesture = null;
+    }
     const order = state.designerDraftLayout?.order;
     if (order) {
       const orderIndex = order.indexOf(id);
@@ -2960,6 +3035,8 @@
     }
     renderDesignerOrderList();
     renderDesignerCustomKeys();
+    renderFunctionKeyList();
+    renderFunctionEditor();
     updateDesignerStatus();
     sendPreviewConfig();
   }
@@ -2998,7 +3075,12 @@
       code,
       modifiers: MODIFIER_ORDER.filter((modifier) => modifiers.includes(modifier))
     };
+    if (state.designerGestureActions?.[entry.id]) {
+      state.designerGestureActions[entry.id].action = entry.action;
+    }
     renderDesignerCustomKeys();
+    renderFunctionKeyList();
+    renderFunctionEditor();
     updateDesignerStatus();
     sendPreviewConfig();
     return true;
@@ -3070,17 +3152,23 @@
         setDesignerError('自定义按键名称不能为空');
         return;
       }
-      if (entry.action?.type !== 'keys' || !entry.action.code) {
-        setDesignerError(`请先为「${label}」录制快捷键`);
-        const button = dom.customKeyList.querySelector(`[data-custom-shortcut-id="${entry.id}"]`);
-        button?.focus();
-        return;
+      const gestureActions = state.designerGestureActions?.[entry.id] || {};
+      for (const [prop, gestureLabel] of [['action', '单击'], ['doubleAction', '双击'], ['longAction', '长按']]) {
+        const action = gestureActions[prop];
+        if (action?.type === 'keys' && !action.code) {
+          setDesignerError(`请先为「${label} · ${gestureLabel}」录制快捷键`);
+          const button = dom.customKeyList.querySelector(`[data-custom-shortcut-id="${entry.id}"]`);
+          button?.focus();
+          return;
+        }
       }
       customKeys.push({
         id: entry.id,
         label,
         meaning: entry.meaning || '自定义快捷键',
-        action: entry.action
+        action: gestureActions.action || { type: 'none' },
+        doubleAction: gestureActions.doubleAction || null,
+        longAction: gestureActions.longAction || null
       });
     }
 
@@ -3304,6 +3392,12 @@
 
   function bindUi() {
     dom.openConfigButton.addEventListener('click', openConfigDrawer);
+    dom.openGestureEditorButton.addEventListener('click', () => {
+      requestCloseConfigDrawer();
+      if (isDrawerOpen()) return;
+      openDesigner();
+      if (state.designerOpen) setDesignerTab('functions');
+    });
     dom.openDesignerButton.addEventListener('click', openDesigner);
     dom.closeDesignerButton.addEventListener('click', requestCloseDesigner);
     dom.cancelDesignerButton.addEventListener('click', requestCloseDesigner);
@@ -3524,8 +3618,10 @@
       if (!label) continue;
       const meaning = cleanDisplayText(entry.meaning, 160) || '自定义快捷键';
       const action = normalizeClientAction(entry.action, { type: 'none' });
+      const doubleAction = normalizeOptionalClientAction(entry.doubleAction);
+      const longAction = normalizeOptionalClientAction(entry.longAction);
       seen.add(entry.id);
-      result.push({ id: entry.id, label, meaning, action });
+      result.push({ id: entry.id, label, meaning, action, doubleAction, longAction });
     }
     return result;
   }
