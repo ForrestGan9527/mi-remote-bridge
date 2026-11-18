@@ -2852,9 +2852,24 @@ body.drawer-open {
   background: #151412;
 }
 
+.config-global-controls {
+  width: 140px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
 .config-global-row .config-select {
   width: 140px;
   flex: none;
+}
+
+.config-global-controls .config-select,
+.config-global-controls .shortcut-button {
+  width: 100%;
+  min-width: 0;
 }
 
 .config-action-row {
@@ -2941,6 +2956,10 @@ body.drawer-open {
   }
 
   .config-global-row .config-select {
+    width: 100%;
+  }
+
+  .config-global-controls {
     width: 100%;
   }
 

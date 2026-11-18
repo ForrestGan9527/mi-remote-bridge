@@ -385,12 +385,16 @@
           <span>语音键触发方式</span>
           <small>语音开始时按住，结束并排空后释放；按当前输入工具的要求选择。</small>
         </div>
-        <select id="voiceTriggerSelect" class="config-select" aria-label="语音键触发方式">
-          <option value="fn">Fn / 地球键</option>
-          <option value="rightOption">右 Option</option>
-          <option value="rightCommand">右 Command</option>
-          <option value="none">不触发</option>
-        </select>
+        <div class="config-global-controls">
+          <select id="voiceTriggerSelect" class="config-select" aria-label="语音键触发方式">
+            <option value="fn">Fn / 地球键</option>
+            <option value="rightOption">右 Option</option>
+            <option value="rightCommand">右 Command</option>
+            <option value="custom">自定义快捷键…</option>
+            <option value="none">不触发</option>
+          </select>
+          <button class="shortcut-button" id="voiceTriggerShortcutButton" type="button" hidden>录制触发键</button>
+        </div>
       </div>
       <div class="config-list" id="configList"></div>
     </div>

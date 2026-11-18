@@ -92,6 +92,7 @@
     'Semicolon', 'Quote', 'Comma', 'Period', 'Slash', 'Backquote'
   ]);
   const MODIFIER_ORDER = ['control', 'option', 'shift', 'cmd', 'fn'];
+  const VOICE_TRIGGER_CAPTURE_KEY = '__voiceTrigger__';
 
   // The remote is a free grid: the order array is the key sequence and the
   // columns value decides how many keys sit on each row.
@@ -249,6 +250,7 @@
     refreshSystemButton: document.getElementById('refreshSystemButton'),
     openAccessibilityButton: document.getElementById('openAccessibilityButton'),
     voiceTriggerSelect: document.getElementById('voiceTriggerSelect'),
+    voiceTriggerShortcutButton: document.getElementById('voiceTriggerShortcutButton'),
     connectPanel: document.getElementById('connectPanel'),
     connectStatus: document.getElementById('connectStatus'),
     connectNote: document.getElementById('connectNote'),
@@ -883,7 +885,11 @@
       rightCommand: '右 Command',
       none: '不触发'
     };
-    dom.systemTrigger.textContent = triggerLabels[status.voiceTrigger] || 'Fn / 地球键';
+    dom.systemTrigger.textContent = status.voiceTrigger === 'custom'
+      ? (status.voiceTriggerShortcut
+        ? formatShortcut(status.voiceTriggerShortcut)
+        : '自定义触发键')
+      : (triggerLabels[status.voiceTrigger] || 'Fn / 地球键');
 
     dom.systemTarget.textContent = status.frontmostApp || '未检测';
     dom.systemSecureInput.textContent = status.secureInput ? '已开启（会拦截按键）' : '正常';
@@ -1552,7 +1558,7 @@
 
     if (!state.dirty && !state.saving) {
       state.draft = clone(normalized);
-      dom.voiceTriggerSelect.value = normalized.voiceTrigger;
+      syncVoiceTriggerControls();
       syncConfigControls();
       if (isDrawerOpen() && changed) {
         renderConfigRows();
@@ -1576,6 +1582,9 @@
   function sameKeyMappings(a, b) {
     if (!a?.keys || !b?.keys) return false;
     if ((a.voiceTrigger || 'fn') !== (b.voiceTrigger || 'fn')) return false;
+    if (JSON.stringify(a.voiceTriggerShortcut || null) !== JSON.stringify(b.voiceTriggerShortcut || null)) {
+      return false;
+    }
     if (
       JSON.stringify(normalizePhoneLayout(a.layout, a.customKeys))
       !== JSON.stringify(normalizePhoneLayout(b.layout, b.customKeys))
@@ -1595,6 +1604,37 @@
     });
   }
 
+  function normalizeClientVoiceTriggerShortcut(value) {
+    if (!value || typeof value !== 'object' || value.type !== 'keys') return null;
+    if (typeof value.code !== 'string' || !ACTION_CODES.has(value.code)) return null;
+    const modifiers = Array.isArray(value.modifiers)
+      ? MODIFIER_ORDER.filter((modifier) => value.modifiers.includes(modifier))
+      : [];
+    return { type: 'keys', code: value.code, modifiers };
+  }
+
+  function syncVoiceTriggerControls() {
+    if (!state.draft) return;
+    const custom = state.draft.voiceTrigger === 'custom';
+    dom.voiceTriggerSelect.value = custom ? 'custom' : (state.draft.voiceTrigger || 'fn');
+    dom.voiceTriggerShortcutButton.hidden = !custom;
+    if (!custom) return;
+    const shortcut = state.draft.voiceTriggerShortcut;
+    dom.voiceTriggerShortcutButton.textContent = shortcut ? formatShortcut(shortcut) : '录制触发键';
+    dom.voiceTriggerShortcutButton.classList.toggle('needs-recording', !shortcut);
+    dom.voiceTriggerShortcutButton.classList.remove('is-capturing');
+  }
+
+  function startVoiceTriggerCapture() {
+    if (!state.draft) return;
+    state.capturingActionKey = VOICE_TRIGGER_CAPTURE_KEY;
+    dom.voiceTriggerShortcutButton.hidden = false;
+    dom.voiceTriggerShortcutButton.classList.add('is-capturing');
+    dom.voiceTriggerShortcutButton.textContent = '请按下触发键…';
+    dom.voiceTriggerShortcutButton.focus();
+    showToast('按下要发送给语音工具的触发键，按 Esc 取消');
+  }
+
   function openConfigDrawer() {
     if (isDrawerOpen()) return;
     state.previousFocus = document.activeElement;
@@ -1603,7 +1643,7 @@
     state.saving = false;
     state.configLoaded = true;
     state.capturingActionKey = null;
-    dom.voiceTriggerSelect.value = state.draft.voiceTrigger || 'fn';
+    syncVoiceTriggerControls();
     renderConfigRows();
     syncConfigControls();
     setConfigStatus('clean', '未修改');
@@ -1837,6 +1877,10 @@
     if (!state.capturingActionKey) return;
     const key = state.capturingActionKey;
     state.capturingActionKey = null;
+    if (key === VOICE_TRIGGER_CAPTURE_KEY) {
+      syncVoiceTriggerControls();
+      return;
+    }
     const row = dom.configList.querySelector(`.config-row[data-key="${key}"]`);
     if (row) {
       const button = row.querySelector('[data-shortcut-button]');
@@ -1849,12 +1893,26 @@
     if (!state.capturingActionKey) return;
     const key = state.capturingActionKey;
     state.capturingActionKey = null;
+    const normalizedModifiers = MODIFIER_ORDER.filter((modifier) => modifiers.includes(modifier));
+    if (key === VOICE_TRIGGER_CAPTURE_KEY) {
+      if (!state.draft) return;
+      state.draft.voiceTrigger = 'custom';
+      state.draft.voiceTriggerShortcut = {
+        type: 'keys',
+        code,
+        modifiers: normalizedModifiers
+      };
+      syncVoiceTriggerControls();
+      markConfigDirty();
+      showToast('自定义语音触发键已录制');
+      return;
+    }
     const info = state.draft?.keys?.[key];
     if (!info) return;
     info.action = {
       type: 'keys',
       code,
-      modifiers: MODIFIER_ORDER.filter((modifier) => modifiers.includes(modifier))
+      modifiers: normalizedModifiers
     };
     const row = dom.configList.querySelector(`.config-row[data-key="${key}"]`);
     if (row) {
@@ -1949,6 +2007,12 @@
     if ((state.draft.voiceTrigger || 'fn') !== (state.config.voiceTrigger || 'fn')) {
       return true;
     }
+    if (
+      JSON.stringify(state.draft.voiceTriggerShortcut || null)
+      !== JSON.stringify(state.config.voiceTriggerShortcut || null)
+    ) {
+      return true;
+    }
     return KEY_ORDER.some((id) => {
       const a = state.draft.keys?.[id] || {};
       const b = state.config.keys?.[id] || {};
@@ -2017,6 +2081,12 @@
       return;
     }
 
+    if (state.draft.voiceTrigger === 'custom' && !state.draft.voiceTriggerShortcut) {
+      setConfigStatus('error', '请先录制自定义语音触发键');
+      dom.voiceTriggerShortcutButton.focus();
+      return;
+    }
+
     state.saving = true;
     syncConfigControls();
     setConfigStatus('dirty', '正在保存…');
@@ -2030,7 +2100,8 @@
         },
         body: JSON.stringify({
           keys,
-          voiceTrigger: state.draft.voiceTrigger || 'fn'
+          voiceTrigger: state.draft.voiceTrigger || 'fn',
+          voiceTriggerShortcut: state.draft.voiceTriggerShortcut || null
         })
       });
       let payload = null;
@@ -2048,7 +2119,7 @@
       state.voiceTrigger = state.config.voiceTrigger;
       state.saving = false;
       state.dirty = false;
-      dom.voiceTriggerSelect.value = state.voiceTrigger;
+      syncVoiceTriggerControls();
       renderConfigRows();
       syncConfigControls();
       setConfigStatus('saved', '已保存');
@@ -2066,7 +2137,7 @@
     if (!state.dirty || state.saving) return;
     state.draft = clone(state.config);
     state.capturingActionKey = null;
-    dom.voiceTriggerSelect.value = state.draft.voiceTrigger || 'fn';
+    syncVoiceTriggerControls();
     renderConfigRows();
     syncConfigControls();
     setConfigStatus('clean', '未修改');
@@ -3479,8 +3550,18 @@
     dom.voiceTriggerSelect.addEventListener('change', () => {
       if (!state.draft) return;
       state.draft.voiceTrigger = dom.voiceTriggerSelect.value;
+      if (state.draft.voiceTrigger === 'custom') {
+        if (!state.draft.voiceTriggerShortcut) {
+          startVoiceTriggerCapture();
+        } else {
+          syncVoiceTriggerControls();
+        }
+      } else {
+        syncVoiceTriggerControls();
+      }
       markConfigDirty();
     });
+    dom.voiceTriggerShortcutButton.addEventListener('click', startVoiceTriggerCapture);
     dom.saveConfigButton.addEventListener('click', saveConfig);
     dom.revertConfigButton.addEventListener('click', revertConfig);
     document.addEventListener('keydown', handleDrawerKeydown);
@@ -3752,6 +3833,7 @@
       revision: 0,
       updatedAt: null,
       voiceTrigger: 'fn',
+      voiceTriggerShortcut: null,
       audioDevice: '',
       layout: defaultPhoneLayout(),
       customKeys: [],
@@ -3766,9 +3848,10 @@
     normalized.revision = Number.isInteger(config.revision) ? config.revision : 0;
     normalized.updatedAt = typeof config.updatedAt === 'string' ? config.updatedAt : null;
     normalized.audioDevice = typeof config.audioDevice === 'string' ? config.audioDevice : '';
-    if (['fn', 'rightOption', 'rightCommand', 'none'].includes(config.voiceTrigger)) {
+    if (['fn', 'rightOption', 'rightCommand', 'none', 'custom'].includes(config.voiceTrigger)) {
       normalized.voiceTrigger = config.voiceTrigger;
     }
+    normalized.voiceTriggerShortcut = normalizeClientVoiceTriggerShortcut(config.voiceTriggerShortcut);
     normalized.customKeys = normalizeCustomKeys(config.customKeys);
     normalized.layout = normalizePhoneLayout(config.layout, normalized.customKeys);
     normalized.hiddenKeys = normalizeHiddenKeys(config.hiddenKeys);

@@ -202,6 +202,10 @@ private struct KeyMap {
 final class KeyInjector {
     private var functionHeld = false
     private var functionKeyCode: CGKeyCode = 63
+    private var customTriggerHeld = false
+    private var customTriggerKeyCode: CGKeyCode?
+    private var customTriggerFlags: CGEventFlags = []
+    private var customTriggerModifiers: [(CGKeyCode, CGEventFlags)] = []
 
     var accessibilityTrusted: Bool {
         AXIsProcessTrusted()
@@ -611,6 +615,10 @@ final class KeyInjector {
 
     func pressVoiceTrigger(_ trigger: String) {
         guard trigger != "none", accessibilityTrusted else { return }
+        if trigger == "custom" {
+            pressCustomVoiceTrigger()
+            return
+        }
         let keyCode: CGKeyCode?
         let flagValue: CGEventFlags
         switch trigger {
@@ -645,6 +653,10 @@ final class KeyInjector {
     }
 
     func releaseVoiceTrigger() {
+        if customTriggerHeld {
+            releaseCustomVoiceTrigger()
+            return
+        }
         guard functionHeld else { return }
         functionHeld = false
         guard let source = CGEventSource(stateID: .hidSystemState),
@@ -654,6 +666,90 @@ final class KeyInjector {
         up.type = .flagsChanged
         up.flags = []
         up.post(tap: .cghidEventTap)
+    }
+
+    private func pressCustomVoiceTrigger() {
+        guard !customTriggerHeld,
+              accessibilityTrusted,
+              let shortcut = voiceTriggerShortcut,
+              let code = shortcut["code"] as? String,
+              let keyCode = KeyMap.byCode[code],
+              let source = CGEventSource(stateID: .hidSystemState) else {
+            return
+        }
+
+        let requested = (shortcut["modifiers"] as? [String]) ?? []
+        let ordered = ["control", "option", "shift", "cmd", "fn"].filter {
+            requested.contains($0)
+        }
+        var flags: CGEventFlags = []
+        customTriggerModifiers = []
+
+        for modifier in ordered {
+            guard let info = modifierKeyInfo(modifier) else { continue }
+            flags.formUnion(info.flags)
+            guard let down = CGEvent(
+                keyboardEventSource: source,
+                virtualKey: info.keyCode,
+                keyDown: true
+            ) else { continue }
+            down.type = .flagsChanged
+            down.flags = flags
+            down.post(tap: .cghidEventTap)
+            customTriggerModifiers.append((info.keyCode, info.flags))
+        }
+
+        guard let down = CGEvent(
+            keyboardEventSource: source,
+            virtualKey: keyCode,
+            keyDown: true
+        ) else {
+            releaseModifiers(source: source, pressed: customTriggerModifiers)
+            customTriggerModifiers = []
+            return
+        }
+        down.flags = flags
+        down.post(tap: .cghidEventTap)
+        customTriggerHeld = true
+        customTriggerKeyCode = keyCode
+        customTriggerFlags = flags
+    }
+
+    private func releaseCustomVoiceTrigger() {
+        guard customTriggerHeld else { return }
+        customTriggerHeld = false
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            customTriggerModifiers = []
+            customTriggerKeyCode = nil
+            return
+        }
+
+        if let keyCode = customTriggerKeyCode,
+           let up = CGEvent(
+            keyboardEventSource: source,
+            virtualKey: keyCode,
+            keyDown: false
+           ) {
+            up.flags = customTriggerFlags
+            up.post(tap: .cghidEventTap)
+        }
+        customTriggerKeyCode = nil
+
+        var flags = customTriggerFlags
+        for (keyCode, modifierFlags) in customTriggerModifiers.reversed() {
+            flags.remove(modifierFlags)
+            if let up = CGEvent(
+                keyboardEventSource: source,
+                virtualKey: keyCode,
+                keyDown: false
+            ) {
+                up.type = .flagsChanged
+                up.flags = flags
+                up.post(tap: .cghidEventTap)
+            }
+        }
+        customTriggerModifiers = []
+        customTriggerFlags = []
     }
 
     private func modifierKeyInfo(_ modifier: String) -> (keyCode: CGKeyCode, flags: CGEventFlags)? {
@@ -887,6 +983,7 @@ let output = VirtualAudioOutput()
 let keys = KeyInjector()
 var selectedDevice: AudioDeviceInfo?
 var voiceTrigger = "fn"
+var voiceTriggerShortcut: [String: Any]?
 var preferredDeviceName: String? = ProcessInfo.processInfo.environment["SYSTEM_AUDIO_DEVICE"]
 
 func currentStatus() -> [String: Any] {
@@ -905,6 +1002,7 @@ func currentStatus() -> [String: Any] {
         "audioAvailable": selectedDevice != nil,
         "accessibility": keys.accessibilityTrusted,
         "voiceTrigger": voiceTrigger,
+        "voiceTriggerShortcut": voiceTriggerShortcut ?? NSNull(),
         "active": output.isActive,
         "frontmostApp": frontmost?.localizedName ?? "",
         "frontmostBundleId": frontmost?.bundleIdentifier ?? "",
@@ -952,8 +1050,16 @@ func handle(_ command: [String: Any]) {
     switch type {
     case "configure":
         if let trigger = command["voiceTrigger"] as? String,
-           ["fn", "rightOption", "rightCommand", "none"].contains(trigger) {
+           ["fn", "rightOption", "rightCommand", "none", "custom"].contains(trigger) {
             voiceTrigger = trigger
+        }
+        if let shortcut = command["voiceTriggerShortcut"] as? [String: Any],
+           (shortcut["type"] as? String) == "keys",
+           let code = shortcut["code"] as? String,
+           KeyMap.byCode[code] != nil {
+            voiceTriggerShortcut = shortcut
+        } else if command.keys.contains("voiceTriggerShortcut") {
+            voiceTriggerShortcut = nil
         }
         configureDevice(command["audioDevice"] as? String)
         return
