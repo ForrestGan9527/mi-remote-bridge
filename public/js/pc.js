@@ -152,6 +152,21 @@
   const MAX_TRANSCRIPT_LENGTH = 4000;
   const textDecoder = new TextDecoder();
 
+  const THEME_META = {
+    ember: '#0b0b0c',
+    dusk: '#060b14',
+    violet: '#0a0612',
+    forest: '#040f0a',
+    contrast: '#000000'
+  };
+  const THEME_LABELS = {
+    ember: '暖夜',
+    dusk: '暮蓝',
+    violet: '紫夜',
+    forest: '森林',
+    contrast: '清晰'
+  };
+
   const state = {
     ws: null,
     wsOpen: false,
@@ -176,7 +191,14 @@
     lastKeyAt: 0,
     lastKey: null,
     latestTranscript: '',
+    currentPhoneTranscript: '',
+    lastVoicePcmPeak: 0,
+    lastVoiceEndAt: 0,
+    lastPinyinText: '',
+    lastPinyinAt: 0,
+    lastAppleFinalText: '',
     recognitionMode: 'mac',
+    outputMode: 'clipboard',
     voices: new Map(),
     voiceOrder: [],
     activeVoiceId: null,
@@ -211,6 +233,7 @@
   const dom = {
     desktopStatus: document.getElementById('desktopStatus'),
     desktopStatusText: document.getElementById('desktopStatusText'),
+    themeSelect: document.getElementById('themeSelect'),
     liveClock: document.getElementById('liveClock'),
     signalKey: document.getElementById('signalKey'),
     signalBadge: document.getElementById('signalBadge'),
@@ -227,9 +250,11 @@
     waveBars: document.getElementById('waveBars'),
     voiceHistory: document.getElementById('voiceHistory'),
     recognitionModeSelect: document.getElementById('recognitionModeSelect'),
+    outputModeSelect: document.getElementById('outputModeSelect'),
     voiceHistoryCount: document.getElementById('voiceHistoryCount'),
     autoplayToggle: document.getElementById('autoplayToggle'),
     copyTranscriptButton: document.getElementById('copyTranscriptButton'),
+    pinyinTranscriptButton: document.getElementById('pinyinTranscriptButton'),
     feedList: document.getElementById('feedList'),
     clearFeedButton: document.getElementById('clearFeedButton'),
     systemPanel: document.getElementById('systemPanel'),
@@ -243,6 +268,8 @@
     copyBlackholeCommand: document.getElementById('copyBlackholeCommand'),
     redetectAudioButton: document.getElementById('redetectAudioButton'),
     systemAccessibility: document.getElementById('systemAccessibility'),
+    systemAppleSpeech: document.getElementById('systemAppleSpeech'),
+    requestSpeechAccessButton: document.getElementById('requestSpeechAccessButton'),
     systemDefaultInput: document.getElementById('systemDefaultInput'),
     setDefaultMicButton: document.getElementById('setDefaultMicButton'),
     systemTriggerSelect: document.getElementById('systemTriggerSelect'),
@@ -331,8 +358,13 @@
     voiceEmptyMarkup = dom.voiceHistory.innerHTML;
     state.config = fallbackConfig();
     state.draft = clone(state.config);
+    state.theme = readTheme();
+    applyTheme(state.theme, false);
+    dom.themeSelect.value = state.theme;
     state.recognitionMode = readRecognitionMode();
     dom.recognitionModeSelect.value = state.recognitionMode;
+    state.outputMode = readOutputMode();
+    dom.outputModeSelect.value = state.outputMode;
     state.autoplay = readAutoplayPreference();
     updateAutoplayButton();
     buildWaveBars();
@@ -493,6 +525,14 @@
           type: 'system-set-capture-text',
           enabled: state.recognitionMode === 'mac'
         });
+        sendJson({
+          type: 'system-set-apple-speech',
+          enabled: state.recognitionMode === 'apple'
+        });
+        sendJson({
+          type: 'recognition-mode',
+          mode: state.recognitionMode
+        });
         if (message.config) applyServerConfig(message.config);
         applySystemStatus(message.system || {
           supported: false,
@@ -512,12 +552,20 @@
         handleSystemEvent(message);
         break;
 
+      case 'speech-result':
+        handleSpeechResult(message);
+        break;
+
       case 'presence':
         applyPresence(message, false);
         break;
 
       case 'key':
         handleKey(message);
+        break;
+
+      case 'phone-text':
+        handlePhoneText(message);
         break;
 
       case 'voice-start':
@@ -937,6 +985,27 @@
     dom.requestAccessButton.hidden = Boolean(status.accessibility) || !available;
     dom.requestAccessButton.disabled = !available || !status.helperReady;
 
+    const speechAuthorization = status.appleSpeechAuthorization || 'unknown';
+    const speechAuthorized = speechAuthorization === 'authorized';
+    const speechAvailable = Boolean(status.appleSpeechAvailable);
+    let speechLabel = '未检测';
+    if (status.helperReady) {
+      if (speechAuthorized) {
+        speechLabel = speechAvailable ? '可用' : '不可用';
+      } else if (speechAuthorization === 'denied' || speechAuthorization === 'restricted') {
+        speechLabel = '已拒绝';
+      } else {
+        speechLabel = '未授权';
+      }
+    }
+    dom.systemAppleSpeech.textContent = speechLabel;
+    dom.systemAppleSpeech.classList.toggle('is-ok', speechAuthorized && speechAvailable);
+    dom.requestSpeechAccessButton.hidden = speechAuthorized || !available;
+    dom.requestSpeechAccessButton.disabled = !available || !status.helperReady;
+    dom.systemAppleSpeech.title = status.appleSpeechOnDevice
+      ? 'Apple Speech（中文，本机识别）'
+      : 'Apple Speech';
+
     dom.systemDefaultInput.textContent = status.defaultInputName || '未检测';
     const inputMismatch = Boolean(
       status.deviceUID
@@ -1057,8 +1126,33 @@
   function handleSystemEvent(event) {
     if (!event) return;
     if (event.ok && event.action === 'captureText') {
-      addFeed('system', '识别文字已复制', event.message || '已复制识别文字');
+      const text = event.message || '';
+      if (text) setLatestTranscript(text);
+      if (event.origin === 'capture') {
+        if (!event.final) return;
+        if (state.outputMode === 'pinyin' && text) {
+          const alreadyQueued = state.lastPinyinText === text
+            && Date.now() - state.lastPinyinAt < 15000;
+          if (!alreadyQueued) {
+            sendPinyin(text, 0, { waitForRustDesk: true });
+          }
+          return;
+        }
+        addFeed('system', '识别文字已复制', text || '已复制识别文字');
+        showToast('已复制识别文字，可在 Windows 中粘贴');
+        return;
+      }
+      addFeed('system', '识别文字已复制', text || '已复制识别文字');
       showToast('已复制识别文字，可在 Windows 中粘贴');
+      return;
+    }
+    if (event.ok && event.action === 'pinyinPreview') {
+      addFeed('system', '拼音已转换', event.message || '');
+      return;
+    }
+    if (event.ok && event.action === 'typeText') {
+      addFeed('system', '拼音按键已发送', event.message || '已输入拼音');
+      showToast('拼音已输入到焦点窗口，请用远程输入法选字');
       return;
     }
     if (!event.ok) {
@@ -1129,6 +1223,10 @@
   function handleVoiceStart(message) {
     if (!isValidVoiceId(message.id)) return;
     if (state.voices.has(message.id) && !state.voices.get(message.id).ended) return;
+    state.lastAppleFinalText = '';
+    state.currentPhoneTranscript = '';
+    state.lastVoicePcmPeak = 0;
+    state.lastVoiceEndAt = 0;
 
     if (state.activeVoiceId && state.activeVoiceId !== message.id) {
       const previous = state.voices.get(state.activeVoiceId);
@@ -1180,6 +1278,74 @@
     highlightRemoteKey('voice', 1400);
   }
 
+  function handlePhoneText(message) {
+    const text = cleanDisplayText(message.text, MAX_TRANSCRIPT_LENGTH, false);
+    if (!text) return;
+    setLatestTranscript(text);
+    addFeed('system', '收到手机键盘文字', text);
+    if (state.outputMode === 'pinyin') {
+      // Keyboard text must follow the current focus. Do not activate
+      // RustDesk or wait for it; the user may be targeting any app.
+      sendPinyin(text, 0, { waitForRustDesk: false });
+      return;
+    }
+    if (!sendJson({ type: 'system-copy-text', text })) {
+      showToast('服务未连接，无法复制手机文字', true);
+    }
+  }
+
+  function applyVoiceOutput(text) {
+    if (!text) return false;
+    if (state.outputMode === 'pinyin') {
+      // Apple Speech is already running on the Mac; type into whatever the
+      // user has focused instead of waiting for RustDesk to be activated.
+      sendPinyin(text, 0, { waitForRustDesk: false });
+      return true;
+    }
+    if (!sendJson({ type: 'system-copy-text', text })) {
+      showToast('服务未连接，无法复制识别文字', true);
+      return false;
+    }
+    return true;
+  }
+
+  function handleSpeechResult(message) {
+    if (message.source !== 'apple' || state.recognitionMode !== 'apple') return;
+    const text = cleanDisplayText(message.text, MAX_TRANSCRIPT_LENGTH, false);
+
+    if (message.error) {
+      if (!message.final) return;
+      const fallback = state.currentPhoneTranscript.trim();
+      const detail = `${message.error}；服务端 PCM 峰值 ${state.lastVoicePcmPeak}`;
+      if (fallback) {
+        state.currentPhoneTranscript = '';
+        setLatestTranscript(fallback);
+        addFeed('system', 'Mac 本机识别失败，改用手机识别', fallback);
+        showToast('Mac 本机识别失败，已改用手机识别文字');
+        applyVoiceOutput(fallback);
+        return;
+      }
+      addFeed('system', 'Mac 本机识别失败', detail);
+      showToast(`Mac 本机识别失败：${detail}`, true);
+      return;
+    }
+    if (!text) return;
+
+    setLatestTranscript(text);
+    if (!message.final) return;
+    if (state.lastAppleFinalText === text) return;
+    state.lastAppleFinalText = text;
+    state.currentPhoneTranscript = '';
+
+    const latency = state.lastVoiceEndAt ? Date.now() - state.lastVoiceEndAt : 0;
+    addFeed(
+      'system',
+      latency ? `Mac 本机识别 · ${(latency / 1000).toFixed(1)}s` : 'Mac 本机识别',
+      text
+    );
+    applyVoiceOutput(text);
+  }
+
   function handleVoiceTranscript(message) {
     if (!isValidVoiceId(message.id)) return;
     const entry = state.voices.get(message.id);
@@ -1201,15 +1367,18 @@
 
   function readRecognitionMode() {
     try {
-      return localStorage.getItem('remoteBridge.recognitionMode') === 'phone' ? 'phone' : 'mac';
+      const mode = localStorage.getItem('remoteBridge.recognitionMode');
+      if (mode === 'phone' || mode === 'apple') return mode;
+      return 'mac';
     } catch {
       return 'mac';
     }
   }
 
   function applyRecognitionMode(mode) {
-    state.recognitionMode = mode === 'phone' ? 'phone' : 'mac';
+    state.recognitionMode = ['phone', 'apple'].includes(mode) ? mode : 'mac';
     dom.recognitionModeSelect.value = state.recognitionMode;
+    state.lastAppleFinalText = '';
     try {
       localStorage.setItem('remoteBridge.recognitionMode', state.recognitionMode);
     } catch {
@@ -1219,15 +1388,111 @@
       type: 'system-set-capture-text',
       enabled: state.recognitionMode === 'mac'
     });
+    sendJson({
+      type: 'system-set-apple-speech',
+      enabled: state.recognitionMode === 'apple'
+    });
+    sendJson({
+      type: 'recognition-mode',
+      mode: state.recognitionMode
+    });
   }
 
-  function maybeCopyPhoneTranscript(entry) {
+  function readTheme() {
+    try {
+      const theme = localStorage.getItem('remoteBridge.theme');
+      return Object.hasOwn(THEME_META, theme) ? theme : 'ember';
+    } catch {
+      return 'ember';
+    }
+  }
+
+  function applyTheme(theme, persist = true) {
+    const value = Object.hasOwn(THEME_META, theme) ? theme : 'ember';
+    state.theme = value;
+    if (value === 'ember') {
+      delete document.documentElement.dataset.theme;
+    } else {
+      document.documentElement.dataset.theme = value;
+    }
+    document.querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', THEME_META[value]);
+    if (persist) {
+      try {
+        localStorage.setItem('remoteBridge.theme', value);
+      } catch {
+        // Storage is optional.
+      }
+    }
+  }
+
+  function readOutputMode() {
+    try {
+      return localStorage.getItem('remoteBridge.outputMode') === 'pinyin'
+        ? 'pinyin'
+        : 'clipboard';
+    } catch {
+      return 'clipboard';
+    }
+  }
+
+  function applyOutputMode(mode) {
+    state.outputMode = mode === 'pinyin' ? 'pinyin' : 'clipboard';
+    dom.outputModeSelect.value = state.outputMode;
+    try {
+      localStorage.setItem('remoteBridge.outputMode', state.outputMode);
+    } catch {
+      // Storage is optional.
+    }
+  }
+
+  function setLatestTranscript(text) {
+    const value = typeof text === 'string' ? text.trim() : '';
+    if (!value) return;
+    state.latestTranscript = value;
+    dom.copyTranscriptButton.disabled = false;
+    dom.pinyinTranscriptButton.disabled = false;
+  }
+
+  function sendPinyin(text, delayMs = 0, options = {}) {
+    const waitForRustDesk = Boolean(options.waitForRustDesk);
+    const payload = { type: 'system-type-pinyin', text, delayMs };
+    if (waitForRustDesk) {
+      payload.waitForRustDesk = true;
+      payload.waitTimeoutMs = Number(options.waitTimeoutMs) || 20000;
+    }
+    if (!sendJson(payload)) {
+      showToast('服务未连接，无法发送拼音按键', true);
+      return false;
+    }
+    state.lastPinyinText = text;
+    state.lastPinyinAt = Date.now();
+    if (waitForRustDesk) {
+      addFeed('system', '拼音按键等待中', '保持 RustDesk 窗口在前台，切换后会自动输入');
+      showToast('切换到 RustDesk 窗口后会自动输入拼音');
+    } else if (delayMs > 0) {
+      const seconds = Math.round(delayMs / 1000);
+      addFeed('system', '准备拼音按键', `${seconds} 秒后输入，请切换到远程窗口`);
+      showToast(`${seconds} 秒后输入拼音，请切换到远程窗口`);
+    }
+    return true;
+  }
+
+  function maybeHandlePhoneTranscript(entry) {
     if (state.recognitionMode !== 'phone' || entry.source === 'file') return;
     const text = (entry.transcript || '').trim();
     if (!text) {
-      sendJson({ type: 'system-clear-text' });
+      if (state.outputMode === 'clipboard') {
+        sendJson({ type: 'system-clear-text' });
+        showToast('手机浏览器没有返回识别文字，剪贴板已清空', true);
+      } else {
+        showToast('手机浏览器没有返回识别文字', true);
+      }
       addFeed('system', '手机未返回识别文字', '请确认手机浏览器支持语音识别，或改用 Mac 豆包模式');
-      showToast('手机浏览器没有返回识别文字，剪贴板已清空', true);
+      return;
+    }
+    if (state.outputMode === 'pinyin') {
+      sendPinyin(text, 0, { waitForRustDesk: true });
       return;
     }
     if (!sendJson({ type: 'system-copy-text', text })) {
@@ -1271,15 +1536,19 @@
     const transcript = cleanDisplayText(message.transcript, MAX_TRANSCRIPT_LENGTH, false);
     if (transcript) entry.transcript = transcript;
     if (entry.transcript) {
-      state.latestTranscript = entry.transcript;
-      dom.copyTranscriptButton.disabled = false;
+      setLatestTranscript(entry.transcript);
+      if (entry.source !== 'file') {
+        state.currentPhoneTranscript = entry.transcript;
+      }
     }
     entry.durationMs = Number.isFinite(Number(message.durationMs))
       ? Math.max(0, Number(message.durationMs))
       : null;
     if (entry.source === 'file') entry.durationMs = null;
+    state.lastVoicePcmPeak = Math.max(0, Number(message.pcmPeak) || 0);
+    state.lastVoiceEndAt = Date.now();
 
-    maybeCopyPhoneTranscript(entry);
+    maybeHandlePhoneTranscript(entry);
     finishVoice(entry, {
       cancelled: Boolean(message.cancelled),
       reason: message.reason || null
@@ -3706,11 +3975,30 @@
 
     dom.voiceHistory.addEventListener('click', handleVoiceHistoryClick);
     dom.recognitionModeSelect.addEventListener('change', () => {
-      const mode = dom.recognitionModeSelect.value === 'phone' ? 'phone' : 'mac';
+      const value = dom.recognitionModeSelect.value;
+      const mode = value === 'phone' || value === 'apple' ? value : 'mac';
       applyRecognitionMode(mode);
-      showToast(mode === 'phone'
-        ? '已切换为手机网页识别：松开语音键后自动复制识别文字'
-        : '已切换为 Mac 豆包识别：需要 Mac 前台输入框保持焦点');
+      if (mode === 'phone') {
+        showToast('已切换为手机网页识别：松开语音键后自动处理识别文字');
+      } else if (mode === 'apple') {
+        showToast('已切换为 Mac 本机识别：松开语音键后由 Apple Speech 识别，首次需要允许语音识别权限');
+      } else {
+        showToast('已切换为 Mac 豆包识别：需要 Mac 前台输入框保持焦点');
+      }
+    });
+    dom.themeSelect.addEventListener('change', () => {
+      const theme = Object.hasOwn(THEME_META, dom.themeSelect.value)
+        ? dom.themeSelect.value
+        : 'ember';
+      applyTheme(theme);
+      showToast(`已切换到${THEME_LABELS[theme]}主题`);
+    });
+    dom.outputModeSelect.addEventListener('change', () => {
+      const mode = dom.outputModeSelect.value === 'pinyin' ? 'pinyin' : 'clipboard';
+      applyOutputMode(mode);
+      showToast(mode === 'pinyin'
+        ? '拼音按键：语音识别会等待 RustDesk；手机键盘文字直接输入当前焦点'
+        : '识别结果会复制到剪贴板，可在 Windows 中粘贴');
     });
     dom.autoplayToggle.addEventListener('click', toggleAutoplay);
     dom.copyTranscriptButton.addEventListener('click', () => {
@@ -3719,6 +4007,13 @@
         return;
       }
       copyText(state.latestTranscript, '已复制识别文字，可粘贴到 Windows');
+    });
+    dom.pinyinTranscriptButton.addEventListener('click', () => {
+      if (!state.latestTranscript) {
+        showToast('还没有可转换的识别文字');
+        return;
+      }
+      sendPinyin(state.latestTranscript, 0, { waitForRustDesk: true });
     });
     dom.clearFeedButton.addEventListener('click', clearFeed);
 
@@ -3765,6 +4060,14 @@
         }
       }, 2500);
       setTimeout(() => sendJson({ type: 'system-refresh' }), 1000);
+    });
+    dom.requestSpeechAccessButton.addEventListener('click', () => {
+      if (!sendJson({ type: 'system-request-speech-access' })) {
+        showToast('服务未连接，无法请求语音识别权限', true);
+        return;
+      }
+      showToast('已请求语音识别权限；若未弹窗，请在系统设置 → 隐私与安全性 → 语音识别中允许');
+      setTimeout(() => sendJson({ type: 'system-refresh' }), 1200);
     });
     dom.systemTriggerSelect.addEventListener('change', () => {
       const value = dom.systemTriggerSelect.value;

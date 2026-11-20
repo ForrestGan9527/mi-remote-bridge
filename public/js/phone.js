@@ -4,11 +4,14 @@
   const MAX_RECORDING_MS = 60_000;
   const MAX_UPLOAD_BYTES = 14 * 1024 * 1024;
   const MAX_TRANSCRIPT_LENGTH = 4000;
+  const RECOGNITION_PLACEHOLDER = '按住语音键说话，识别结果会显示在这里。';
   const PCM_CHUNK_SAMPLES = 1024;
   const IS_PREVIEW = location.pathname.replace(/\/+$/, '') === '/preview';
   const VOICE_TAIL_MS = 140;
   const DOUBLE_TAP_MS = 300;
   const LONG_PRESS_MS = 550;
+  const DELETE_REPEAT_DELAY_MS = 420;
+  const DELETE_REPEAT_INTERVAL_MS = 70;
   const textEncoder = new TextEncoder();
 
   const FALLBACK_KEYS = {
@@ -84,6 +87,7 @@
     voiceHold: false,
     voiceStarting: false,
     voice: null,
+    remoteRecognitionMode: 'phone',
     lastSentKey: null,
     order: [...DEFAULT_LAYOUT_ORDER],
     columns: DEFAULT_LAYOUT_COLUMNS,
@@ -95,9 +99,19 @@
     connectionText: document.getElementById('connectionText'),
     connectionSub: document.getElementById('connectionSub'),
     helpButton: document.getElementById('helpButton'),
+    textInputButton: document.getElementById('textInputButton'),
+    textModal: document.getElementById('textModal'),
+    phoneTextInput: document.getElementById('phoneTextInput'),
+    phoneTextCount: document.getElementById('phoneTextCount'),
+    clearPhoneText: document.getElementById('clearPhoneText'),
+    cancelPhoneText: document.getElementById('cancelPhoneText'),
+    sendPhoneText: document.getElementById('sendPhoneText'),
     voiceHint: document.getElementById('voiceHint'),
     keyGrid: document.getElementById('keyGrid'),
     okActionSub: document.getElementById('okActionSub'),
+    recognitionDisplay: document.getElementById('recognitionDisplay'),
+    recognitionSource: document.getElementById('recognitionSource'),
+    recognitionText: document.getElementById('recognitionText'),
     voiceOverlay: document.getElementById('voiceOverlay'),
     voiceTimer: document.getElementById('voiceTimer'),
     voiceWave: document.getElementById('voiceWave'),
@@ -118,8 +132,11 @@
   let toastTimer = null;
   let lastEventTimer = null;
   let modalUploadAvailable = false;
+  let textLayoutLock = null;
+  let textUnlockTimer = null;
   let waveBars = [];
   const pressedButtons = new Set();
+  const activeRepeats = new Set();
 
   function init() {
     if (IS_PREVIEW) {
@@ -130,6 +147,7 @@
     buildWaveBars();
     bindKeyButtons();
     bindVoiceExtras();
+    bindTextInput();
     bindGlobalEvents();
     dom.helpButton.addEventListener('click', showRemoteHelp);
     state.token = readPairToken();
@@ -462,6 +480,55 @@
         }
         break;
 
+      case 'phone-text-ack':
+        if (message.deliveredTo === 0) {
+          setLastEvent('文字 · 未送达', false, 2200);
+          showToast('电脑接收端未连接，文字未送达');
+        }
+        break;
+
+      case 'recognition-mode': {
+        const mode = ['mac', 'apple', 'phone'].includes(message.mode)
+          ? message.mode
+          : 'phone';
+        state.remoteRecognitionMode = mode;
+        if (mode !== 'phone' && state.voice) {
+          state.voice.speechBlocked = true;
+          stopSpeechRecognition(state.voice);
+        }
+        break;
+      }
+
+      case 'speech-result': {
+        const isApple = message.source === 'apple';
+        if ((state.voice || state.voiceStarting) && !isApple) break;
+        if (message.error && message.final) {
+          const detail = String(message.error).trim().slice(0, 160);
+          const existing = dom.recognitionText.textContent.trim();
+          const hasPhoneText = existing
+            && !dom.recognitionText.classList.contains('is-placeholder')
+            && !dom.recognitionSource.textContent.includes('Mac');
+          if (hasPhoneText) {
+            showToast('Mac 本机识别失败，保留手机识别文字');
+            break;
+          }
+          setRecognitionDisplay('', {
+            source: 'apple',
+            live: false,
+            placeholder: `本机识别失败：${detail || '未知错误'}`
+          });
+          showToast(`Mac 本机识别失败：${detail || '未知错误'}`);
+          break;
+        }
+        if (typeof message.text === 'string' && message.text.trim()) {
+          setRecognitionDisplay(message.text.slice(0, MAX_TRANSCRIPT_LENGTH), {
+            source: isApple ? 'apple' : message.source === 'mac' ? 'mac' : 'phone',
+            live: isApple && !message.final
+          });
+        }
+        break;
+      }
+
       case 'pong':
       case 'welcome':
         break;
@@ -625,7 +692,9 @@
       secondTap: false,
       voice: false,
       longTimer: null,
-      singleTimer: null
+      singleTimer: null,
+      repeatDelayTimer: null,
+      repeatIntervalTimer: null
     };
 
     const clearLongTimer = () => {
@@ -670,6 +739,23 @@
       if (!hasDouble && !hasLong) {
         gesture.immediateSent = true;
         pressKey(button.dataset.key, 'single');
+        if (button.dataset.key === 'delete') {
+          activeRepeats.add(gesture);
+          gesture.repeatDelayTimer = setTimeout(() => {
+            gesture.repeatDelayTimer = null;
+            if (!gesture.pointerDown) {
+              stopKeyRepeat(gesture);
+              return;
+            }
+            gesture.repeatIntervalTimer = setInterval(() => {
+              if (!gesture.pointerDown) {
+                stopKeyRepeat(gesture);
+                return;
+              }
+              pressKey('delete', 'single', { repeat: true });
+            }, DELETE_REPEAT_INTERVAL_MS);
+          }, DELETE_REPEAT_DELAY_MS);
+        }
         return;
       }
 
@@ -694,6 +780,7 @@
       if (!gesture.pointerDown) return;
       gesture.pointerDown = false;
       clearLongTimer();
+      stopKeyRepeat(gesture);
       if (gesture.voice) {
         gesture.voice = false;
         return;
@@ -726,6 +813,7 @@
     button.addEventListener('pointerup', handlePointerUp);
     button.addEventListener('pointercancel', () => {
       clearLongTimer();
+      stopKeyRepeat(gesture);
       gesture.pointerDown = false;
       gesture.secondTap = false;
       gesture.voice = false;
@@ -759,14 +847,29 @@
     });
   }
 
-  function pressKey(key, gestureName = 'single') {
+  function stopKeyRepeat(gesture) {
+    if (!gesture) return;
+    clearTimeout(gesture.repeatDelayTimer);
+    clearInterval(gesture.repeatIntervalTimer);
+    gesture.repeatDelayTimer = null;
+    gesture.repeatIntervalTimer = null;
+    activeRepeats.delete(gesture);
+  }
+
+  function stopAllKeyRepeats() {
+    for (const gesture of [...activeRepeats]) {
+      stopKeyRepeat(gesture);
+    }
+  }
+
+  function pressKey(key, gestureName = 'single', options = {}) {
     const info = getKeyInfo(key);
     const gestureLabel = gestureName === 'double'
       ? '双击'
       : gestureName === 'long'
         ? '长按'
         : '';
-    if (navigator.vibrate) {
+    if (navigator.vibrate && !options.repeat) {
       try {
         navigator.vibrate(gestureName === 'long' ? 14 : 7);
       } catch {
@@ -846,12 +949,241 @@
     dom.fileInput.addEventListener('change', handleFileSelection);
   }
 
+  function bindTextInput() {
+    dom.textInputButton.addEventListener('click', openTextModal);
+    dom.cancelPhoneText.addEventListener('click', closeTextModal);
+    dom.sendPhoneText.addEventListener('click', sendPhoneText);
+    dom.clearPhoneText.addEventListener('click', () => {
+      dom.phoneTextInput.value = '';
+      updatePhoneTextCount();
+      dom.phoneTextInput.focus();
+    });
+    dom.textModal.querySelector('[data-close-text-modal]')
+      .addEventListener('click', closeTextModal);
+    dom.phoneTextInput.addEventListener('input', updatePhoneTextCount);
+    dom.phoneTextInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      // Enter from the software keyboard's send key should submit directly.
+      // Shift+Enter keeps a newline.
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.shiftKey) return;
+      event.preventDefault();
+      sendPhoneText();
+    });
+    if (window.visualViewport) {
+      const syncViewport = () => {
+        if (!dom.textModal.hidden) layoutTextModal();
+      };
+      window.visualViewport.addEventListener('resize', syncViewport);
+      window.visualViewport.addEventListener('scroll', syncViewport);
+    }
+  }
+
+  function layoutTextModal() {
+    if (dom.textModal.hidden || !window.visualViewport) return;
+    const viewport = window.visualViewport;
+    dom.textModal.style.top = `${viewport.offsetTop}px`;
+    dom.textModal.style.left = `${viewport.offsetLeft}px`;
+    dom.textModal.style.right = 'auto';
+    dom.textModal.style.bottom = 'auto';
+    dom.textModal.style.width = `${viewport.width}px`;
+    dom.textModal.style.height = `${viewport.height}px`;
+    dom.textModal.style.setProperty('--vv-height', `${viewport.height}px`);
+  }
+
+  function resetTextModalLayout() {
+    for (const property of ['top', 'left', 'right', 'bottom', 'width', 'height']) {
+      dom.textModal.style.removeProperty(property);
+    }
+    dom.textModal.style.removeProperty('--vv-height');
+  }
+
+  function lockPhoneLayout() {
+    if (textLayoutLock) return;
+    const stage = document.querySelector('.stage');
+    const remote = document.querySelector('.remote-shell');
+    if (!stage || !remote) return;
+
+    const stageRect = stage.getBoundingClientRect();
+    const remoteRect = remote.getBoundingClientRect();
+    textLayoutLock = {
+      stageStyle: stage.getAttribute('style'),
+      htmlOverflow: document.documentElement.style.overflow,
+      bodyOverflow: document.body.style.overflow,
+      scrollY: window.scrollY,
+      viewportHeight: window.visualViewport?.height || window.innerHeight
+    };
+
+    document.body.classList.add('is-text-input-open');
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    stage.style.position = 'fixed';
+    stage.style.top = `${stageRect.top}px`;
+    stage.style.left = `${stageRect.left}px`;
+    stage.style.width = `${stageRect.width}px`;
+    stage.style.height = `${stageRect.height}px`;
+    stage.style.minHeight = '0';
+    stage.style.margin = '0';
+    stage.style.overflow = 'hidden';
+    stage.style.setProperty('--rw', `${remoteRect.width}px`);
+  }
+
+  function unlockPhoneLayout() {
+    if (!textLayoutLock) return;
+    clearTimeout(textUnlockTimer);
+    textUnlockTimer = null;
+    const stage = document.querySelector('.stage');
+    if (stage) {
+      if (textLayoutLock.stageStyle === null) {
+        stage.removeAttribute('style');
+      } else {
+        stage.setAttribute('style', textLayoutLock.stageStyle);
+      }
+    }
+    document.body.classList.remove('is-text-input-open');
+    document.documentElement.style.overflow = textLayoutLock.htmlOverflow;
+    document.body.style.overflow = textLayoutLock.bodyOverflow;
+    const scrollY = textLayoutLock.scrollY;
+    textLayoutLock = null;
+    window.scrollTo(0, scrollY);
+    setTimeout(resetZoomIfNeeded, 120);
+  }
+
+  function resetZoomIfNeeded() {
+    const scale = window.visualViewport?.scale || 1;
+    if (scale <= 1.05) return;
+
+    let lastAttempt = 0;
+    try {
+      lastAttempt = Number(sessionStorage.getItem('remoteBridge.zoomResetAt')) || 0;
+    } catch {
+      // Storage is optional.
+    }
+    if (Date.now() - lastAttempt < 3000) return;
+    try {
+      sessionStorage.setItem('remoteBridge.zoomResetAt', String(Date.now()));
+    } catch {
+      // Storage is optional.
+    }
+
+    // Give the browser a chance to apply the viewport constraints.
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (meta) {
+      const content = meta.getAttribute('content')
+        || 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+      meta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover');
+      setTimeout(() => {
+        meta.setAttribute('content', content);
+        setTimeout(() => {
+          if ((window.visualViewport?.scale || 1) > 1.05) {
+            window.location.reload();
+          }
+        }, 120);
+      }, 60);
+      return;
+    }
+
+    window.location.reload();
+  }
+
+  function updatePhoneTextCount() {
+    const length = Array.from(dom.phoneTextInput.value).length;
+    dom.phoneTextCount.textContent = `${length} / 4000`;
+  }
+
+  function openTextModal() {
+    if (state.voice || state.voiceStarting) {
+      showToast('请先结束当前录音');
+      return;
+    }
+    if (!state.wsOpen || !state.ready) {
+      showToast('服务尚未连接，暂时无法发送文字');
+      return;
+    }
+    if (state.pcs === 0) {
+      showToast('电脑接收端尚未连接');
+      return;
+    }
+    clearTimeout(textUnlockTimer);
+    textUnlockTimer = null;
+    lockPhoneLayout();
+    dom.textModal.hidden = false;
+    updatePhoneTextCount();
+    layoutTextModal();
+    try {
+      // Focus inside the original click gesture and avoid browser scrolling.
+      dom.phoneTextInput.focus({ preventScroll: true });
+    } catch {
+      // The keyboard cannot always be opened programmatically.
+    }
+  }
+
+  function closeTextModal() {
+    try {
+      dom.phoneTextInput.blur();
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    } catch {
+      // Ignore focus failures.
+    }
+    dom.textModal.hidden = true;
+    resetTextModalLayout();
+    scheduleUnlockPhoneLayout();
+  }
+
+  function scheduleUnlockPhoneLayout() {
+    if (!textLayoutLock) return;
+    const targetHeight = textLayoutLock.viewportHeight;
+    const startedAt = Date.now();
+    const attempt = () => {
+      if (!textLayoutLock) return;
+      const height = window.visualViewport?.height || window.innerHeight;
+      // Keep the remote frozen until the soft keyboard has fully closed.
+      if (height >= targetHeight - 2 || Date.now() - startedAt > 900) {
+        unlockPhoneLayout();
+        return;
+      }
+      textUnlockTimer = setTimeout(attempt, 80);
+    };
+    clearTimeout(textUnlockTimer);
+    textUnlockTimer = setTimeout(attempt, 180);
+  }
+
+  function sendPhoneText() {
+    const text = dom.phoneTextInput.value.trim();
+    if (!text) {
+      showToast('还没有输入文字');
+      return;
+    }
+    if (state.pcs === 0) {
+      showToast('电脑接收端未连接，文字未发送');
+      return;
+    }
+    if (!sendJson({
+      type: 'phone-text',
+      text,
+      source: 'keyboard'
+    })) {
+      showToast('服务未连接，文字未发送');
+      return;
+    }
+    setRecognitionDisplay(text, { source: 'keyboard', live: false });
+    setLastEvent('文字 · 已发送', true, 1400);
+    showToast('文字已发送');
+    closeTextModal();
+    dom.phoneTextInput.value = '';
+    updatePhoneTextCount();
+  }
+
   function bindGlobalEvents() {
     document.addEventListener('pointerup', () => {
+      stopAllKeyRepeats();
       releaseAllPressedButtons();
       endVoiceHold();
     });
     document.addEventListener('pointercancel', () => {
+      stopAllKeyRepeats();
       releaseAllPressedButtons();
       endVoiceHold();
     });
@@ -859,13 +1191,30 @@
       if (event.target.closest('[data-key]')) event.preventDefault();
     });
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !dom.modal.hidden) closeVoiceModal();
+      if (event.key !== 'Escape') return;
+      if (!dom.textModal.hidden) {
+        closeTextModal();
+        return;
+      }
+      if (!dom.modal.hidden) closeVoiceModal();
     });
+    // Safari on iOS can pinch-zoom the remote into a corner. Keep the
+    // control surface at its designed scale.
+    for (const gesture of ['gesturestart', 'gesturechange', 'gestureend']) {
+      document.addEventListener(gesture, (event) => {
+        event.preventDefault();
+      }, { passive: false });
+    }
     window.addEventListener('blur', () => {
+      stopAllKeyRepeats();
       releaseAllPressedButtons();
       if (state.voiceHold) endVoiceHold();
     });
     document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stopAllKeyRepeats();
+        releaseAllPressedButtons();
+      }
       if (document.hidden && state.voice) {
         requestStopVoice({ cancelled: false });
       }
@@ -1080,6 +1429,11 @@
     dom.voiceOverlay.hidden = false;
     dom.voiceTimer.textContent = '00:00';
     dom.voiceLiveTranscript.textContent = '开始说话…';
+    setRecognitionDisplay('', {
+      source: 'phone',
+      live: true,
+      placeholder: '正在识别…'
+    });
     startWaveAnimation(session);
     startDurationTimer(session);
     startSpeechRecognition(session);
@@ -1308,6 +1662,19 @@
     dom.voiceLiveTranscript.textContent = session.transcript
       ? session.transcript
       : '正在发送语音…';
+    if (state.remoteRecognitionMode === 'phone') {
+      setRecognitionDisplay(session.transcript, {
+        source: 'phone',
+        live: false,
+        placeholder: '正在发送语音…'
+      });
+    } else {
+      setRecognitionDisplay('', {
+        source: state.remoteRecognitionMode === 'apple' ? 'apple' : 'mac',
+        live: true,
+        placeholder: '正在识别…'
+      });
+    }
 
     if (cancelled) {
       cleanupCapture(session);
@@ -1359,6 +1726,20 @@
 
     state.voiceButton?.classList.remove('is-recording', 'is-pressed');
     dom.voiceOverlay.hidden = true;
+
+    if (state.remoteRecognitionMode === 'phone') {
+      setRecognitionDisplay(session.transcript, {
+        source: 'phone',
+        live: false,
+        placeholder: session.cancelled ? '录音已取消' : '未返回识别文字'
+      });
+    } else if (session.cancelled) {
+      setRecognitionDisplay('', {
+        source: state.remoteRecognitionMode === 'apple' ? 'apple' : 'mac',
+        live: false,
+        placeholder: '录音已取消'
+      });
+    }
   }
 
   function startDurationTimer(session) {
@@ -1420,6 +1801,21 @@
   }
 
   function startSpeechRecognition(session) {
+    // Some mobile browsers give SpeechRecognition exclusive access to the
+    // microphone. When the Mac is doing the recognition, keep the mic free for
+    // the PCM stream instead.
+    if (state.remoteRecognitionMode !== 'phone') {
+      session.speechUnavailable = true;
+      setRecognitionDisplay('', {
+        source: state.remoteRecognitionMode === 'apple' ? 'apple' : 'mac',
+        live: true,
+        placeholder: state.remoteRecognitionMode === 'apple'
+          ? 'Mac 本机识别中…'
+          : 'Mac 豆包识别中…'
+      });
+      return;
+    }
+
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) {
       session.speechUnavailable = true;
@@ -1462,6 +1858,10 @@
       session.transcript = `${session.finalTranscript}${interim}`.trim().slice(0, MAX_TRANSCRIPT_LENGTH);
       if (session.transcript) {
         dom.voiceLiveTranscript.textContent = session.transcript;
+        setRecognitionDisplay(session.transcript, {
+          source: 'phone',
+          live: true
+        });
         sendJson({
           type: 'voice-transcript',
           id: session.id,
@@ -1513,6 +1913,35 @@
   function updateLiveTranscriptHint(session) {
     if (state.voice !== session || session.transcript) return;
     dom.voiceLiveTranscript.textContent = '录音中 · 松开后发送语音';
+  }
+
+  function setRecognitionDisplay(text, {
+    source = 'phone',
+    live = false,
+    placeholder = RECOGNITION_PLACEHOLDER
+  } = {}) {
+    if (!dom.recognitionDisplay) return;
+    const value = typeof text === 'string'
+      ? text.trim().slice(0, MAX_TRANSCRIPT_LENGTH)
+      : '';
+    let sourceLabel = '等待语音';
+    if (source === 'mac') {
+      sourceLabel = 'Mac 豆包';
+    } else if (source === 'apple') {
+      sourceLabel = live ? 'Mac 识别中' : 'Mac 本机';
+    } else if (source === 'keyboard') {
+      sourceLabel = '手机键盘';
+    } else if (source === 'phone') {
+      sourceLabel = live ? '手机识别中' : '手机识别';
+    }
+
+    dom.recognitionDisplay.classList.toggle('is-live', Boolean(live));
+    dom.recognitionSource.textContent = sourceLabel;
+    dom.recognitionText.textContent = value || placeholder;
+    dom.recognitionText.classList.toggle('is-placeholder', !value);
+    if (live) {
+      dom.recognitionText.scrollTop = dom.recognitionText.scrollHeight;
+    }
   }
 
   function encodeVoiceFrame(id, arrayBuffer) {

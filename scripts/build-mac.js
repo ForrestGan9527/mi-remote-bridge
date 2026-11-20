@@ -100,6 +100,8 @@ function writeInfoPlist() {
   <true/>
   <key>NSMicrophoneUsageDescription</key>
   <string>用于把手机语音送入本机虚拟麦克风。</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>用于在 Mac 本机把手机语音识别成文字。</string>
 </dict>
 </plist>
 `;
@@ -260,6 +262,8 @@ function createHelperApp(helperSource) {
   <true/>
   <key>NSMicrophoneUsageDescription</key>
   <string>用于把手机语音送入本机虚拟麦克风。</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>用于在 Mac 本机把手机语音识别成文字。</string>
 </dict>
 </plist>
 `;

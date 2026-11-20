@@ -11,7 +11,8 @@
     "build:native": "node scripts/build-native.js",
     "build:mac": "node scripts/build-mac.js",
     "fix:permissions": "tccutil reset Accessibility com.remotebridge.mac || true; tccutil reset Accessibility com.remotebridge.helper || true; tccutil reset Accessibility com.remotebridge.node || true; tccutil reset Microphone com.remotebridge.mac || true; tccutil reset Microphone com.remotebridge.helper || true",
-    "build:dmg": "node scripts/build-mac.js --dmg"
+    "build:dmg": "node scripts/build-mac.js --dmg",
+    "speech:authorize": "open -n \"native/.build/RemoteBridgeHelper.app\" --args --request-speech"
   },
   "keywords": [
     "remote",
@@ -25,6 +26,7 @@
   "type": "commonjs",
   "dependencies": {
     "express": "^5.3.0",
+    "pinyin-pro": "^3.29.5",
     "qrcode": "^1.5.4",
     "ws": "^8.23.0"
   },

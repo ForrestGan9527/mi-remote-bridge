@@ -66,6 +66,7 @@ body {
   text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
+  touch-action: pan-x pan-y;
   overscroll-behavior-y: contain;
   background:
     radial-gradient(72% 48% at 50% 34%, rgba(68, 74, 80, 0.45), transparent 70%),
@@ -131,7 +132,7 @@ button:focus-visible {
 }
 
 .stage {
-  --rw: min(86vw, 720px, calc((100vh - 140px) * 0.44));
+  --rw: min(86vw, 720px, calc((100vh - 210px) * 0.44));
   position: relative;
   z-index: 1;
   width: 100%;
@@ -271,7 +272,7 @@ button:focus-visible {
 
 @supports (height: 100svh) {
   .stage {
-    --rw: min(86vw, 720px, calc((100svh - 140px) * 0.44));
+    --rw: min(86vw, 720px, calc((100svh - 210px) * 0.44));
   }
 }
 
@@ -320,7 +321,15 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: calc(var(--rw) * 0.008) calc(var(--rw) * 0.012) 0;
+}
+
+.remote-actions {
+  display: flex;
+  align-items: center;
+  gap: clamp(7px, calc(var(--rw) * 0.022), 12px);
+  flex: none;
 }
 
 .remote-signature {
@@ -340,6 +349,102 @@ button:focus-visible {
   border-radius: 50%;
   background: #d97748;
   box-shadow: 0 0 7px rgba(217, 119, 72, 0.45);
+}
+
+/* Speech recognition display -------------------------------------------- */
+
+.recognition-display {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: clamp(58px, calc(var(--rw) * 0.22), 84px);
+  margin-top: calc(var(--rw) * 0.028);
+  padding:
+    clamp(7px, calc(var(--rw) * 0.022), 12px)
+    clamp(10px, calc(var(--rw) * 0.032), 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: clamp(12px, calc(var(--rw) * 0.05), 22px);
+  background:
+    radial-gradient(120% 80% at 18% 0%, rgba(255, 255, 255, 0.08), transparent 56%),
+    linear-gradient(155deg, rgba(40, 46, 50, 0.98), rgba(20, 24, 27, 0.99));
+  color: #dfe4e5;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.07) inset,
+    0 -10px 20px -12px rgba(0, 0, 0, 0.6) inset,
+    0 7px 18px -14px rgba(0, 0, 0, 0.9);
+}
+
+.recognition-display.is-live {
+  border-color: rgba(105, 197, 143, 0.32);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 0 0 1px rgba(105, 197, 143, 0.08),
+    0 0 18px -8px rgba(105, 197, 143, 0.55);
+}
+
+.recognition-display-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recognition-display-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(201, 211, 213, 0.56);
+  font-family: var(--font-mono);
+  font-size: clamp(6.5px, calc(var(--rw) * 0.021), 10px);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.recognition-display.is-live .recognition-display-label::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 7px rgba(105, 197, 143, 0.62);
+  animation: softPulse 1.2s ease-in-out infinite;
+}
+
+.recognition-display-source {
+  color: rgba(168, 202, 183, 0.66);
+  font-size: clamp(6.5px, calc(var(--rw) * 0.021), 10px);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.recognition-display-text {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow-y: auto;
+  color: #edf1f2;
+  font-size: clamp(10px, calc(var(--rw) * 0.042), 17px);
+  font-weight: 520;
+  line-height: 1.38;
+  letter-spacing: 0.01em;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.recognition-display-text.is-placeholder {
+  color: rgba(190, 199, 202, 0.42);
+  font-weight: 450;
 }
 
 /* Free key grid --------------------------------------------------------- */
@@ -832,6 +937,38 @@ button:focus-visible {
   text-align: center;
 }
 
+.footer-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-soft);
+  font-family: inherit;
+  font-size: clamp(9px, calc(var(--rw) * 0.026), 12px);
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 0.12s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.footer-text-button svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.footer-text-button:active {
+  transform: scale(0.96);
+  background: rgba(255, 255, 255, 0.1);
+  color: #f0f4f4;
+}
+
 .footer-separator {
   width: 3px;
   height: 3px;
@@ -1099,6 +1236,80 @@ button:focus-visible {
   color: #9aa2a7;
   font-size: 12.5px;
   line-height: 1.65;
+}
+
+.text-modal {
+  padding: 0;
+}
+
+body.is-text-input-open {
+  overflow: hidden;
+}
+
+.text-input-card {
+  width: 100%;
+  max-width: 560px;
+  max-height: var(--vv-height, 100svh);
+  padding: 18px 18px calc(14px + env(safe-area-inset-bottom));
+  border-radius: 24px 24px 0 0;
+  border-bottom: 0;
+}
+
+.text-input-card textarea {
+  width: 100%;
+  min-height: 132px;
+  max-height: 38svh;
+  margin-top: 14px;
+  padding: 12px 13px;
+  resize: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  outline: none;
+  background: rgba(8, 10, 12, 0.55);
+  color: #edf1f2;
+  font-family: inherit;
+  font-size: 17px;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: pan-x pan-y;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.text-input-card textarea::placeholder {
+  color: rgba(190, 199, 202, 0.4);
+}
+
+.text-input-card textarea:focus {
+  border-color: rgba(93, 145, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(93, 145, 255, 0.12);
+}
+
+.text-modal-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  color: #777f84;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.text-clear-button {
+  padding: 4px 6px;
+  border: 0;
+  background: none;
+  color: #8e979c;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.text-clear-button:active {
+  color: #c7ced1;
 }
 
 .modal-actions {
@@ -1497,7 +1708,8 @@ body.is-preview .remote-shell {
 }
 
 body.is-preview [data-key],
-body.is-preview .help-outline {
+body.is-preview .help-outline,
+body.is-preview .footer-text-button {
   pointer-events: none;
 }
 
@@ -1579,14 +1791,14 @@ body.is-preview .help-outline {
 /* Made room for custom shortcut pills without forcing the page to scroll. */
 @media (orientation: portrait) {
   .remote-shell.has-custom-keys {
-    --rw: min(86vw, 720px, calc((100vh - 190px) * 0.44));
+    --rw: min(86vw, 720px, calc((100vh - 260px) * 0.44));
   }
 }
 
 @supports (height: 100svh) {
   @media (orientation: portrait) {
     .remote-shell.has-custom-keys {
-      --rw: min(86vw, 720px, calc((100svh - 190px) * 0.44));
+      --rw: min(86vw, 720px, calc((100svh - 260px) * 0.44));
     }
   }
 }
@@ -1632,5 +1844,39 @@ body.is-preview .help-outline {
   .remote-key {
     max-width: 82px;
     justify-self: center;
+  }
+}
+
+/* Compact recognition display in landscape ------------------------------- */
+@media (orientation: landscape) and (max-height: 560px) {
+  .recognition-display {
+    height: 36px;
+    min-height: 36px;
+    margin-top: 5px;
+    padding: 3px 10px;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    border-radius: 12px;
+  }
+
+  .recognition-display-head {
+    display: none;
+  }
+
+  .recognition-display-text {
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  .footer-text-button {
+    min-height: 22px;
+    padding: 2px 8px;
+    font-size: 9px;
+  }
+
+  .footer-text-button svg {
+    width: 12px;
+    height: 12px;
   }
 }

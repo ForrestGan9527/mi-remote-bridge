@@ -2,12 +2,12 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#0d0f11">
   <meta name="format-detection" content="telephone=no">
   <title>遥控 · 手机端</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="stylesheet" href="/css/phone.css">
+  <link rel="stylesheet" href="/css/phone.css?v=20261120b">
 </head>
 <body>
   <div class="ambient-arc" aria-hidden="true"></div>
@@ -28,14 +28,24 @@
 
       <div class="remote-top">
         <span class="remote-signature" aria-hidden="true"><i></i>REMOTE</span>
-        <button class="outline-key help-outline" id="helpButton" type="button" aria-label="遥控说明" title="遥控说明">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
-            <path d="M4 7h6M16 7h4M4 17h4M14 17h6"/>
-            <circle cx="13" cy="7" r="3"/>
-            <circle cx="11" cy="17" r="3"/>
-          </svg>
-        </button>
+        <div class="remote-actions">
+          <button class="outline-key help-outline" id="helpButton" type="button" aria-label="遥控说明" title="遥控说明">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+              <path d="M4 7h6M16 7h4M4 17h4M14 17h6"/>
+              <circle cx="13" cy="7" r="3"/>
+              <circle cx="11" cy="17" r="3"/>
+            </svg>
+          </button>
+        </div>
       </div>
+
+      <section class="recognition-display" id="recognitionDisplay" aria-label="语音识别结果">
+        <div class="recognition-display-head">
+          <span class="recognition-display-label">语音识别</span>
+          <span class="recognition-display-source" id="recognitionSource">等待语音</span>
+        </div>
+        <p class="recognition-display-text is-placeholder" id="recognitionText" role="status" aria-live="polite" aria-atomic="true">按住语音键说话，识别结果会显示在这里。</p>
+      </section>
 
       <div class="key-grid" id="keyGrid" role="group" aria-label="遥控按键"></div>
     </main>
@@ -43,6 +53,13 @@
     <footer class="phone-footer">
       <div class="footer-hint-row">
         <p class="remote-hint" id="voiceHint">按住麦克风键说话 · 松开即发送</p>
+        <button class="footer-text-button" id="textInputButton" type="button" aria-label="用键盘输入文字" title="用手机键盘输入或语音识别文字，然后发送到电脑">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="6" width="18" height="12" rx="2.5"/>
+            <path d="M7 10h.01M10.5 10h.01M14 10h.01M17.5 10h.01M7 13.5h10"/>
+          </svg>
+          键盘输入
+        </button>
       </div>
       <div class="last-event" id="lastEvent">
         <span class="last-event-dot" aria-hidden="true"></span>
@@ -83,7 +100,24 @@
     </section>
   </div>
 
+  <div class="modal text-modal" id="textModal" hidden>
+    <div class="modal-backdrop" data-close-text-modal></div>
+    <section class="modal-card text-input-card" role="dialog" aria-modal="true" aria-labelledby="textModalTitle">
+      <h2 id="textModalTitle">输入要发送的文字</h2>
+      <p>可以使用手机输入法的语音键识别，确认后发送到电脑。</p>
+      <textarea id="phoneTextInput" maxlength="4000" rows="5" placeholder="在这里输入或语音识别文字…" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send"></textarea>
+      <div class="text-modal-meta">
+        <span id="phoneTextCount">0 / 4000</span>
+        <button class="text-clear-button" id="clearPhoneText" type="button">清空</button>
+      </div>
+      <div class="modal-actions">
+        <button class="button button-secondary" id="cancelPhoneText" type="button">取消</button>
+        <button class="button button-primary" id="sendPhoneText" type="button">发送到电脑</button>
+      </div>
+    </section>
+  </div>
+
   <input type="file" id="audioFileInput" accept="audio/*" hidden>
-  <script src="/js/phone.js"></script>
+  <script src="/js/phone.js?v=20261120b"></script>
 </body>
 </html>

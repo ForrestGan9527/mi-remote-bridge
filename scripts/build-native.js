@@ -6,6 +6,7 @@ const { spawnSync } = require('node:child_process');
 
 const rootDir = path.resolve(__dirname, '..');
 const sourcePath = path.join(rootDir, 'native', 'RemoteBridgeHelper.swift');
+const infoPlistPath = path.join(rootDir, 'native', 'helper-Info.plist');
 const buildDir = path.join(rootDir, 'native', '.build');
 const outputPath = path.join(buildDir, 'RemoteBridgeHelper');
 
@@ -28,7 +29,12 @@ const result = spawnSync(
     '-framework', 'AVFoundation',
     '-framework', 'CoreAudio',
     '-framework', 'AudioToolbox',
-    '-framework', 'ApplicationServices'
+    '-framework', 'ApplicationServices',
+    '-framework', 'Speech',
+    '-Xlinker', '-sectcreate',
+    '-Xlinker', '__TEXT',
+    '-Xlinker', '__info_plist',
+    '-Xlinker', infoPlistPath
   ],
   { stdio: 'inherit', timeout: 90_000 }
 );
@@ -42,4 +48,17 @@ spawnSync('codesign', ['--force', '--sign', '-', outputPath], {
   stdio: 'ignore',
   timeout: 15_000
 });
+
+const helperAppPath = path.join(buildDir, 'RemoteBridgeHelper.app');
+fs.rmSync(helperAppPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+const helperMacOSDir = path.join(helperAppPath, 'Contents', 'MacOS');
+fs.mkdirSync(helperMacOSDir, { recursive: true });
+fs.copyFileSync(outputPath, path.join(helperMacOSDir, 'RemoteBridgeHelper'));
+fs.chmodSync(path.join(helperMacOSDir, 'RemoteBridgeHelper'), 0o755);
+fs.copyFileSync(infoPlistPath, path.join(helperAppPath, 'Contents', 'Info.plist'));
+spawnSync('codesign', ['--force', '--sign', '-', helperAppPath], {
+  stdio: 'ignore',
+  timeout: 15_000
+});
 console.log(`本机桥接已生成：${outputPath}`);
+console.log(`开发用辅助 App 已生成：${helperAppPath}`);

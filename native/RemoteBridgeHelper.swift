@@ -5,6 +5,7 @@ import AVFoundation
 import Carbon
 import CoreAudio
 import Foundation
+import Speech
 
 // A small, local-only helper for the Remote Bridge web app.
 // It receives PCM and actions over stdin as newline-delimited JSON and writes
@@ -234,6 +235,28 @@ private struct KeyMap {
         "ArrowLeft": 123, "ArrowRight": 124, "ArrowDown": 125, "ArrowUp": 126,
         "NumpadEnter": 76
     ]
+
+    // US ANSI virtual key codes for plain ASCII characters. Pinyin output is
+    // ASCII-only, so this is enough to replay it as normal keyboard events.
+    static let byCharacter: [Character: CGKeyCode] = [
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5,
+        "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12,
+        "w": 13, "e": 14, "r": 15, "y": 16, "t": 17,
+        "1": 18, "2": 19, "3": 20, "4": 21, "6": 22,
+        "5": 23, "=": 24, "9": 25, "7": 26, "-": 27,
+        "8": 28, "0": 29, "]": 30, "o": 31,
+        "u": 32, "[": 33, "i": 34, "p": 35, "\n": 36,
+        "l": 37, "j": 38, "'": 39, "k": 40, ";": 41,
+        "\\": 42, ",": 43, "/": 44, "n": 45, "m": 46,
+        ".": 47, "\t": 48, " ": 49, "`": 50
+    ]
+
+    static let shiftedSymbols: [Character: Character] = [
+        "!": "1", "@": "2", "#": "3", "$": "4", "%": "5",
+        "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
+        "_": "-", "+": "=", "{": "[", "}": "]", "|": "\\",
+        ":": ";", "\"": "'", "<": ",", ">": ".", "?": "/", "~": "`"
+    ]
 }
 
 func axCopyElement(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {
@@ -346,9 +369,14 @@ final class TextCapture {
     private var startedAt = Date()
     private var timer: DispatchSourceTimer?
     private var copiedText = ""
+    private var sourceAppName = ""
+    private var sourceBundleId = ""
 
     func begin() {
         cancel()
+        let app = NSWorkspace.shared.frontmostApplication
+        sourceAppName = app?.localizedName ?? ""
+        sourceBundleId = app?.bundleIdentifier ?? ""
         element = axFocusedTextElement()
         beforeValue = element.flatMap(axReadText) ?? ""
         lastValue = beforeValue
@@ -378,6 +406,8 @@ final class TextCapture {
         beforeValue = ""
         lastValue = ""
         copiedText = ""
+        sourceAppName = ""
+        sourceBundleId = ""
     }
 
     private func poll() {
@@ -401,16 +431,31 @@ final class TextCapture {
             if !text.isEmpty && text != copiedText {
                 copiedText = text
                 copyToClipboard(text)
-                emit(["type": "captured-text", "text": text])
+                emitCapturedText(text, final: false)
             }
         }
         if !copiedText.isEmpty && now.timeIntervalSince(lastChangeAt) > 3.0 {
+            emitCapturedText(copiedText, final: true)
             cancel()
             return
         }
         if elapsed > 20 {
+            if !copiedText.isEmpty {
+                emitCapturedText(copiedText, final: true)
+            }
             cancel()
         }
+    }
+
+    private func emitCapturedText(_ text: String, final: Bool) {
+        emit([
+            "type": "captured-text",
+            "origin": "capture",
+            "final": final,
+            "text": text,
+            "app": sourceAppName,
+            "bundleId": sourceBundleId
+        ])
     }
 
     private func copyToClipboard(_ text: String) {
@@ -419,6 +464,377 @@ final class TextCapture {
             pasteboard.clearContents()
             pasteboard.setString(text, forType: .string)
         }
+    }
+}
+
+final class AppleSpeechRecognizer {
+    private let queue = DispatchQueue(label: "remote-bridge.apple-speech")
+    private let locale = Locale(identifier: "zh-CN")
+    private var recognizer: SFSpeechRecognizer?
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var format: AVAudioFormat?
+    private var latestText = ""
+    private var lastEmittedText = ""
+    private var finalEmitted = false
+    private var active = false
+    private var warmingUp = false
+    private var finishPending = false
+    private var pendingAudio: [Data] = []
+    private var drainTimer: DispatchSourceTimer?
+    private var finishTimer: DispatchSourceTimer?
+    private var bufferErrorEmitted = false
+    private var receivedBytes = 0
+    private var peakAmplitude = 0
+
+    var enabled = false
+
+    init() {
+        recognizer = SFSpeechRecognizer(locale: locale)
+    }
+
+    var authorizationName: String {
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized: return "authorized"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "notDetermined"
+        @unknown default: return "unknown"
+        }
+    }
+
+    var isAvailable: Bool {
+        recognizer?.isAvailable ?? false
+    }
+
+    var supportsOnDevice: Bool {
+        recognizer?.supportsOnDeviceRecognition ?? false
+    }
+
+    var isActive: Bool {
+        active
+    }
+
+    func setEnabled(_ value: Bool) {
+        enabled = value
+        if !value {
+            queue.async {
+                self.cancelLocked()
+            }
+        }
+    }
+
+    func requestAuthorization(completion: @escaping (SFSpeechRecognizerAuthorizationStatus) -> Void) {
+        DispatchQueue.main.async {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            SFSpeechRecognizer.requestAuthorization { status in
+                DispatchQueue.main.async {
+                    completion(status)
+                    sendStatus()
+                }
+            }
+        }
+    }
+
+    func start(sampleRate: Double) -> (Bool, String) {
+        guard enabled else {
+            return (false, "本机语音识别未启用")
+        }
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
+            return (false, "需要先在系统设置中允许语音识别权限")
+        }
+        guard let recognizer = recognizer ?? SFSpeechRecognizer(locale: locale),
+              recognizer.isAvailable else {
+            return (false, "Apple 语音识别当前不可用")
+        }
+        guard let audioFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: true
+        ) else {
+            return (false, "无法创建语音识别音频格式")
+        }
+
+        var startError: String?
+        queue.sync {
+            self.cancelLocked()
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
+            request.taskHint = .dictation
+            request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+
+            self.request = request
+            self.format = audioFormat
+            self.latestText = ""
+            self.lastEmittedText = ""
+            self.finalEmitted = false
+            self.active = true
+            self.warmingUp = true
+            self.finishPending = false
+            self.pendingAudio.removeAll(keepingCapacity: true)
+            self.bufferErrorEmitted = false
+            self.receivedBytes = 0
+            self.peakAmplitude = 0
+
+            self.task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                guard let self else { return }
+                self.queue.async {
+                    guard self.active else { return }
+                    if let result {
+                        let text = result.bestTranscription.formattedString
+                        if !text.isEmpty {
+                            self.latestText = text
+                            if text != self.lastEmittedText {
+                                self.lastEmittedText = text
+                                emit([
+                                    "type": "speech-text",
+                                    "source": "apple",
+                                    "text": text,
+                                    "final": false
+                                ])
+                            }
+                        }
+                        if result.isFinal {
+                            self.finishLocked(error: nil)
+                        }
+                    }
+                    if let error {
+                        self.finishLocked(error: error.localizedDescription)
+                    }
+                }
+            }
+
+            if self.task != nil {
+                self.beginWarmupLocked()
+            } else {
+                startError = "无法启动 Apple 语音识别"
+                self.cleanupLocked()
+            }
+        }
+
+        if let startError {
+            return (false, startError)
+        }
+        return (true, "ok")
+    }
+
+    func append(_ data: Data) {
+        guard data.count >= MemoryLayout<Int16>.size else { return }
+        queue.async {
+            guard self.active else { return }
+            self.receivedBytes += data.count
+            data.withUnsafeBytes { raw in
+                guard let samples = raw.bindMemory(to: Int16.self).baseAddress else { return }
+                for index in 0..<(data.count / MemoryLayout<Int16>.size) {
+                    let value = abs(Int(samples[index]))
+                    if value > self.peakAmplitude { self.peakAmplitude = value }
+                }
+            }
+            if self.warmingUp {
+                if self.pendingAudio.count < 64 {
+                    self.pendingAudio.append(data)
+                }
+                return
+            }
+            self.appendAudioLocked(data)
+        }
+    }
+
+    private func beginWarmupLocked() {
+        warmingUp = true
+        finishPending = false
+        drainTimer?.cancel()
+        drainTimer = nil
+        pendingAudio.removeAll(keepingCapacity: true)
+        let stepSeconds = 0.1
+        // A short real-time warm-up avoids dropping the first buffer on some
+        // systems without adding noticeable latency.
+        let steps = 1
+        for index in 1...steps {
+            queue.asyncAfter(
+                deadline: .now() + .milliseconds(Int(stepSeconds * 1000) * index)
+            ) { [weak self] in
+                guard let self, self.active, self.warmingUp else { return }
+                self.appendSilenceLocked(seconds: stepSeconds)
+                guard index == steps else { return }
+                self.warmingUp = false
+                let chunks = self.pendingAudio
+                self.pendingAudio.removeAll(keepingCapacity: true)
+                for chunk in chunks {
+                    self.appendAudioLocked(chunk)
+                }
+                if self.finishPending {
+                    self.finishPending = false
+                    self.endAudioLocked()
+                }
+            }
+        }
+    }
+
+    private func startDrainLocked() {
+        drainTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            self?.drainOneLocked()
+        }
+        drainTimer = timer
+        timer.resume()
+    }
+
+    private func drainOneLocked() {
+        guard active else {
+            drainTimer?.cancel()
+            drainTimer = nil
+            return
+        }
+        if pendingAudio.isEmpty {
+            if finishPending {
+                finishPending = false
+                endAudioLocked()
+            }
+            return
+        }
+        let chunk = pendingAudio.removeFirst()
+        appendAudioLocked(chunk)
+    }
+
+    func finish() {
+        queue.async { [weak self] in
+            guard let self, self.active else { return }
+            if self.warmingUp {
+                self.finishPending = true
+                return
+            }
+            self.endAudioLocked()
+        }
+    }
+
+    func cancel() {
+        enabled = false
+        queue.async {
+            self.cancelLocked()
+        }
+    }
+
+    private func endAudioLocked() {
+        drainTimer?.cancel()
+        drainTimer = nil
+        request?.endAudio()
+        finishTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 4.0)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.finishLocked(error: nil)
+        }
+        finishTimer = timer
+        timer.resume()
+    }
+
+    private func appendAudioLocked(_ data: Data) {
+        guard let request = request, let format = format else { return }
+        let frames = data.count / MemoryLayout<Int16>.size
+        guard frames > 0,
+              let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(frames)
+              ), let destination = buffer.int16ChannelData?[0] else {
+            if !bufferErrorEmitted {
+                bufferErrorEmitted = true
+                emitError("无法创建语音识别音频缓冲区", code: "speech_audio_failed")
+            }
+            return
+        }
+        buffer.frameLength = AVAudioFrameCount(frames)
+        data.withUnsafeBytes { raw in
+            guard let source = raw.bindMemory(to: Int16.self).baseAddress else {
+                return
+            }
+            destination.update(from: source, count: frames)
+        }
+        request.append(buffer)
+    }
+
+    private func appendSilenceLocked(seconds: Double) {
+        guard let request = request, let format = format else { return }
+        let frames = AVAudioFrameCount(format.sampleRate * seconds)
+        guard frames > 0,
+              let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: frames
+              ), let pointer = buffer.int16ChannelData?[0] else {
+            return
+        }
+        buffer.frameLength = frames
+        pointer.initialize(repeating: 0, count: Int(frames))
+        request.append(buffer)
+    }
+
+    private func finishLocked(error: String?) {
+        guard !finalEmitted else { return }
+        finalEmitted = true
+        let text = latestText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var message = error?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty && (message == nil || message == "cancelled") {
+            message = "没有识别到文字（收到 \(receivedBytes) 字节音频）"
+        } else if text.isEmpty, let existing = message, !existing.isEmpty {
+            message = "\(existing)（音频 \(receivedBytes) 字节，峰值 \(peakAmplitude)）"
+        }
+
+        var payload: [String: Any] = [
+            "type": "speech-text",
+            "source": "apple",
+            "text": text,
+            "final": true,
+            "audioBytes": receivedBytes,
+            "peakAmplitude": peakAmplitude
+        ]
+        if let message, !message.isEmpty {
+            payload["error"] = message
+        }
+        emit(payload)
+        cleanupLocked()
+    }
+
+    private func cancelLocked() {
+        active = false
+        warmingUp = false
+        finishPending = false
+        pendingAudio.removeAll(keepingCapacity: false)
+        receivedBytes = 0
+        peakAmplitude = 0
+        drainTimer?.cancel()
+        drainTimer = nil
+        finalEmitted = true
+        finishTimer?.cancel()
+        finishTimer = nil
+        task?.cancel()
+        task = nil
+        request?.endAudio()
+        request = nil
+        format = nil
+        latestText = ""
+        lastEmittedText = ""
+    }
+
+    private func cleanupLocked() {
+        active = false
+        warmingUp = false
+        finishPending = false
+        pendingAudio.removeAll(keepingCapacity: false)
+        receivedBytes = 0
+        peakAmplitude = 0
+        drainTimer?.cancel()
+        drainTimer = nil
+        finishTimer?.cancel()
+        finishTimer = nil
+        task = nil
+        request = nil
+        format = nil
+        latestText = ""
+        lastEmittedText = ""
     }
 }
 
@@ -432,6 +848,42 @@ final class KeyInjector {
 
     var accessibilityTrusted: Bool {
         AXIsProcessTrusted()
+    }
+
+    private var voiceTriggerHeld: Bool {
+        functionHeld || customTriggerHeld
+    }
+
+    private func isAsciiCapable(_ source: TISInputSource) -> Bool {
+        guard let raw = TISGetInputSourceProperty(
+            source,
+            kTISPropertyInputSourceIsASCIICapable
+        ) else {
+            return false
+        }
+        let value = Unmanaged<CFBoolean>.fromOpaque(raw).takeUnretainedValue()
+        return CFBooleanGetValue(value)
+    }
+
+    /// Key codes only make sense with a Latin layout. If a Chinese input
+    /// method is active, the locally posted pinyin letters would be consumed
+    /// by macOS instead of reaching the remote desktop window.
+    private func switchToAsciiInputSource() -> (restore: TISInputSource?, error: String?) {
+        guard let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else {
+            return (nil, nil)
+        }
+        if isAsciiCapable(current) {
+            return (nil, nil)
+        }
+        guard let ascii = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?
+            .takeRetainedValue() else {
+            return (nil, "请先把 Mac 输入法切到英文（ABC）")
+        }
+        guard TISSelectInputSource(ascii) == noErr else {
+            return (nil, "无法切换到 Mac 英文输入法，请手动切换到 ABC")
+        }
+        Thread.sleep(forTimeInterval: 0.15)
+        return (current, nil)
     }
 
     func requestAccessibility() -> Bool {
@@ -486,6 +938,143 @@ final class KeyInjector {
         up.post(tap: .cghidEventTap)
         releaseModifiers(source: source, pressed: pressedModifiers)
         return (true, "ok")
+    }
+
+    private func isRustDeskFrontmost() -> Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
+        let name = app.localizedName ?? ""
+        let bundleId = app.bundleIdentifier ?? ""
+        return name.range(of: "RustDesk", options: .caseInsensitive) != nil
+            || bundleId.range(of: "rustdesk", options: .caseInsensitive) != nil
+    }
+
+    private func waitForRustDeskFrontmost(timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        repeat {
+            if isRustDeskFrontmost() { return true }
+            Thread.sleep(forTimeInterval: 0.1)
+        } while Date() < deadline
+        return false
+    }
+
+    /// Types plain ASCII text as real key down/up events. This is used for
+    /// pinyin: the events are forwarded by remote-desktop clients such as
+    /// RustDesk and interpreted by the remote Chinese input method.
+    func typeText(
+        _ text: String,
+        waitForRustDesk: Bool = false,
+        waitTimeout: TimeInterval = 20
+    ) -> (Bool, String) {
+        guard accessibilityTrusted else {
+            return (false, "需要先在系统设置中授予辅助功能权限")
+        }
+        guard !text.isEmpty else {
+            return (false, "没有可输入的拼音文字")
+        }
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            return (false, "无法创建输入事件源")
+        }
+
+        // `audio-end` releases the voice trigger after the audio queue drains.
+        // Wait for that release so typing while Fn / Right Control is still
+        // held does not turn into shortcuts.
+        let releaseDeadline = Date().addingTimeInterval(5)
+        while voiceTriggerHeld && Date() < releaseDeadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if voiceTriggerHeld {
+            releaseVoiceTrigger()
+        }
+
+        if waitForRustDesk && !waitForRustDeskFrontmost(timeout: waitTimeout) {
+            return (false, "等待 RustDesk 窗口超时，请先切换到 RustDesk")
+        }
+
+        let inputSource = switchToAsciiInputSource()
+        if let error = inputSource.error {
+            return (false, error)
+        }
+        defer {
+            if let restore = inputSource.restore {
+                // Let the remote client finish consuming the key events before
+                // restoring the user's Chinese input method.
+                Thread.sleep(forTimeInterval: 0.2)
+                TISSelectInputSource(restore)
+            }
+        }
+        let switchedNote = inputSource.restore == nil
+            ? ""
+            : "（已临时切换 Mac 输入法到 ABC）"
+
+        let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "前台应用"
+        let maxKeys = 2400
+        var typed = 0
+        var skipped = 0
+
+        for character in text {
+            if typed >= maxKeys { break }
+            var base = character
+            var needsShift = false
+
+            if base.isUppercase, let lowered = base.lowercased().first {
+                base = lowered
+                needsShift = true
+            } else if let shifted = KeyMap.shiftedSymbols[base] {
+                base = shifted
+                needsShift = true
+            }
+
+            guard let keyCode = KeyMap.byCharacter[base] else {
+                skipped += 1
+                continue
+            }
+
+            if needsShift {
+                postShift(true, source: source)
+            }
+
+            let flags: CGEventFlags = needsShift ? .maskShift : []
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+                if needsShift { postShift(false, source: source) }
+                skipped += 1
+                continue
+            }
+            down.flags = flags
+            up.flags = flags
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            if needsShift {
+                postShift(false, source: source)
+            }
+
+            typed += 1
+            // Give the remote-desktop client and the remote IME time to keep
+            // up with the synthetic key stream.
+            Thread.sleep(forTimeInterval: 0.012)
+        }
+
+        guard typed > 0 else {
+            return (false, "没有可输入的 ASCII 字符")
+        }
+
+        let preview = text.count > 80 ? String(text.prefix(80)) + "…" : text
+        let skippedNote = skipped > 0 ? "，跳过 \(skipped) 个字符" : ""
+        return (
+            true,
+            "已向 \(appName) 输入拼音 \(typed) 个字符：\(preview)\(skippedNote)\(switchedNote)"
+        )
+    }
+
+    private func postShift(_ down: Bool, source: CGEventSource) {
+        guard let event = CGEvent(
+            keyboardEventSource: source,
+            virtualKey: 56,
+            keyDown: down
+        ) else { return }
+        event.type = .flagsChanged
+        event.flags = down ? .maskShift : []
+        event.post(tap: .cghidEventTap)
     }
 
     func postMedia(_ command: String) -> (Bool, String) {
@@ -1207,9 +1796,11 @@ final class VirtualAudioOutput {
 }
 
 let commandQueue = DispatchQueue(label: "remote-bridge.helper.commands")
+let typingQueue = DispatchQueue(label: "remote-bridge.helper.typing")
 let output = VirtualAudioOutput()
 let keys = KeyInjector()
 let textCapture = TextCapture()
+let appleSpeech = AppleSpeechRecognizer()
 var selectedDevice: AudioDeviceInfo?
 var voiceTrigger = "fn"
 var voiceTriggerShortcut: [String: Any]?
@@ -1235,6 +1826,11 @@ func currentStatus() -> [String: Any] {
         "voiceTriggerShortcut": voiceTriggerShortcut ?? NSNull(),
         "active": output.isActive,
         "captureTextEnabled": captureTextEnabled,
+        "appleSpeechEnabled": appleSpeech.enabled,
+        "appleSpeechActive": appleSpeech.isActive,
+        "appleSpeechAuthorization": appleSpeech.authorizationName,
+        "appleSpeechAvailable": appleSpeech.isAvailable,
+        "appleSpeechOnDevice": appleSpeech.supportsOnDevice,
         "frontmostApp": frontmost?.localizedName ?? "",
         "frontmostBundleId": frontmost?.bundleIdentifier ?? "",
         "secureInput": IsSecureEventInputEnabled(),
@@ -1335,6 +1931,16 @@ func handle(_ command: [String: Any]) {
         sendStatus()
         return
 
+    case "set-speech-recognition":
+        appleSpeech.setEnabled((command["enabled"] as? Bool) ?? false)
+        sendStatus()
+        return
+
+    case "request-speech-access":
+        appleSpeech.requestAuthorization { _ in }
+        sendStatus()
+        return
+
     case "clear-text":
         DispatchQueue.main.async {
             NSPasteboard.general.clearContents()
@@ -1351,7 +1957,42 @@ func handle(_ command: [String: Any]) {
             pasteboard.clearContents()
             pasteboard.setString(limited, forType: .string)
         }
-        emit(["type": "captured-text", "text": limited])
+        emit(["type": "captured-text", "origin": "copy", "text": limited])
+        return
+
+    case "type-text":
+        guard let text = command["text"] as? String, !text.isEmpty else {
+            emit([
+                "type": "action-result",
+                "action": "typeText",
+                "ok": false,
+                "message": "没有可输入的拼音文字"
+            ])
+            return
+        }
+        let limited = String(text.prefix(2400))
+        let requestedDelay = (command["delayMs"] as? NSNumber)?.doubleValue ?? 0
+        let delayMs = max(0, min(10_000, requestedDelay))
+        let waitForRustDesk = (command["waitForRustDesk"] as? Bool) ?? false
+        let requestedWait = (command["waitTimeoutMs"] as? NSNumber)?.doubleValue ?? 20_000
+        let waitTimeout = max(0, min(30_000, requestedWait)) / 1000
+        typingQueue.async {
+            if delayMs > 0 {
+                Thread.sleep(forTimeInterval: delayMs / 1000)
+            }
+            let result = keys.typeText(
+                limited,
+                waitForRustDesk: waitForRustDesk,
+                waitTimeout: waitTimeout
+            )
+            emit([
+                "type": "action-result",
+                "action": "typeText",
+                "ok": result.0,
+                "message": result.1
+            ])
+            sendStatus()
+        }
         return
 
     case "audio-start":
@@ -1373,12 +2014,20 @@ func handle(_ command: [String: Any]) {
         } else {
             textCapture.cancel()
         }
-        keys.pressVoiceTrigger(trigger)
+        if appleSpeech.enabled {
+            let speech = appleSpeech.start(sampleRate: sampleRate)
+            if !speech.0 {
+                emitError(speech.1, code: "speech_start_failed")
+            }
+        }
+        if !appleSpeech.enabled {
+            keys.pressVoiceTrigger(trigger)
+        }
         emit([
             "type": "audio-started",
             "device": device.name,
             "sampleRate": sampleRate,
-            "voiceTrigger": trigger,
+            "voiceTrigger": appleSpeech.enabled ? "none" : trigger,
             "accessibility": keys.accessibilityTrusted
         ])
         return
@@ -1388,10 +2037,12 @@ func handle(_ command: [String: Any]) {
               let audio = Data(base64Encoded: data) else {
             return
         }
+        appleSpeech.append(audio)
         output.enqueue(audio)
         return
 
     case "audio-end":
+        appleSpeech.finish()
         output.finish {
             commandQueue.async {
                 keys.releaseVoiceTrigger()
@@ -1440,6 +2091,7 @@ func handle(_ command: [String: Any]) {
         return
 
     case "quit":
+        appleSpeech.cancel()
         output.stop()
         keys.releaseVoiceTrigger()
         exit(0)
@@ -1447,6 +2099,49 @@ func handle(_ command: [String: Any]) {
     default:
         emitError("未知的控制命令：\(type)", code: "unknown_command")
     }
+}
+
+func speechAuthorizationName(_ status: SFSpeechRecognizerAuthorizationStatus) -> String {
+    switch status {
+    case .authorized: return "authorized"
+    case .denied: return "denied"
+    case .restricted: return "restricted"
+    case .notDetermined: return "notDetermined"
+    @unknown default: return "unknown"
+    }
+}
+
+if CommandLine.arguments.contains("--request-speech") {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 440, height: 150),
+        styleMask: [.titled, .closable],
+        backing: .buffered,
+        defer: false
+    )
+    window.title = "Remote Bridge 语音识别"
+    let label = NSTextField(labelWithString: "正在请求语音识别权限…")
+    label.frame = NSRect(x: 22, y: 72, width: 396, height: 44)
+    label.font = NSFont.systemFont(ofSize: 14)
+    window.contentView?.addSubview(label)
+    window.center()
+    window.makeKeyAndOrderFront(nil)
+    app.activate(ignoringOtherApps: true)
+    SFSpeechRecognizer.requestAuthorization { status in
+        DispatchQueue.main.async {
+            label.stringValue = "授权状态：\(speechAuthorizationName(status))"
+            emit([
+                "type": "speech-authorization",
+                "status": speechAuthorizationName(status)
+            ])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                exit(0)
+            }
+        }
+    }
+    app.run()
+    exit(0)
 }
 
 emit([

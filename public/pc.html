@@ -4,9 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b0b0c">
+  <script>
+    try {
+      const theme = localStorage.getItem("remoteBridge.theme");
+      if (["dusk", "violet", "forest", "contrast"].includes(theme)) {
+        document.documentElement.dataset.theme = theme;
+      }
+    } catch {}
+  </script>
   <title>Remote Bridge · 桌面接收端</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="stylesheet" href="/css/pc.css">
+  <link rel="stylesheet" href="/css/pc.css?v=20261120c">
 </head>
 <body>
   <div class="page-glow page-glow--one" aria-hidden="true"></div>
@@ -33,6 +41,21 @@
           <span class="connection-dot" aria-hidden="true"></span>
           <span id="desktopStatusText">正在连接服务</span>
         </div>
+        <label class="theme-picker" title="切换界面主题">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3a9 9 0 1 0 0 18h1.4a1.6 1.6 0 0 0 1.1-2.7 1.6 1.6 0 0 1 1.1-2.7H18a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z"/>
+            <circle cx="7.5" cy="11.5" r="1" fill="currentColor" stroke="none"/>
+            <circle cx="10" cy="7.5" r="1" fill="currentColor" stroke="none"/>
+            <circle cx="15" cy="7.5" r="1" fill="currentColor" stroke="none"/>
+          </svg>
+          <select id="themeSelect" aria-label="界面主题">
+            <option value="ember">暖夜</option>
+            <option value="dusk">暮蓝</option>
+            <option value="violet">紫夜</option>
+            <option value="forest">森林</option>
+            <option value="contrast">清晰</option>
+          </select>
+        </label>
         <button class="button button-ghost" id="openConnectButton" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="7" y="2.5" width="10" height="19" rx="2.5"/>
@@ -116,9 +139,14 @@
               <p>手机端按住语音键，录音与实时转写会传到这里。</p>
             </div>
             <div class="voice-tools">
-              <select class="config-select recognition-mode-select" id="recognitionModeSelect" aria-label="语音识别来源" title="Mac 豆包：从 Mac 前台输入框提取；手机网页：使用手机浏览器识别，不需要 Mac 焦点">
+              <select class="config-select recognition-mode-select" id="recognitionModeSelect" aria-label="语音识别来源" title="Mac 豆包：从 Mac 前台输入框提取；Mac 本机：由 Apple Speech 直接识别手机音频；手机网页：使用手机浏览器识别">
                 <option value="mac">识别：Mac 豆包</option>
+                <option value="apple">识别：Mac 本机</option>
                 <option value="phone">识别：手机网页</option>
+              </select>
+              <select class="config-select output-mode-select" id="outputModeSelect" aria-label="识别结果输出方式" title="剪贴板：复制识别文字；拼音按键：把中文转成拼音并通过键盘输入到当前焦点窗口">
+                <option value="clipboard">输出：剪贴板</option>
+                <option value="pinyin">输出：拼音按键</option>
               </select>
               <div class="voice-status" id="voiceStatus">
                 <span class="voice-status-dot"></span>
@@ -129,6 +157,7 @@
                 自动播放
               </button>
               <button class="text-button" id="copyTranscriptButton" type="button" disabled title="复制最近一次识别文字，可粘贴到 Windows">复制识别文字</button>
+              <button class="text-button" id="pinyinTranscriptButton" type="button" disabled title="把最近一次识别文字转换成拼音，切换到 RustDesk 后自动输入">拼音按键</button>
             </div>
           </div>
 
@@ -227,6 +256,11 @@
               <span class="system-row-label">辅助功能</span>
               <span class="system-row-value" id="systemAccessibility">未检测</span>
               <button class="text-button" id="requestAccessButton" type="button" hidden>授权</button>
+            </div>
+            <div class="system-row">
+              <span class="system-row-label">本机识别</span>
+              <span class="system-row-value" id="systemAppleSpeech">未检测</span>
+              <button class="text-button" id="requestSpeechAccessButton" type="button" hidden>授权</button>
             </div>
             <div class="system-row">
               <span class="system-row-label">语音触发</span>
@@ -528,6 +562,6 @@
   </div>
 
   <div class="toast" id="pcToast" role="status" aria-live="polite"></div>
-  <script src="/js/pc.js"></script>
+  <script src="/js/pc.js?v=20261120c"></script>
 </body>
 </html>

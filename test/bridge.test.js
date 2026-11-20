@@ -320,6 +320,70 @@ test('bridge server handles config, keys, voice, and presence', async (t) => {
     }
   });
 
+  await t.test('relays phone keyboard text to PC receivers', async () => {
+    const pc = await connectClient(wsUrl, 'pc', token);
+    const phone = await connectClient(wsUrl, 'phone', token);
+
+    try {
+      phone.ws.send(JSON.stringify({
+        type: 'phone-text',
+        text: '你好，世界！',
+        source: 'keyboard'
+      }));
+
+      const received = await waitForMessage(
+        pc.messages,
+        (message) => message.type === 'phone-text'
+      );
+      assert.equal(received.text, '你好，世界！');
+      assert.equal(received.source, 'keyboard');
+
+      const ack = await waitForMessage(
+        phone.messages,
+        (message) => message.type === 'phone-text-ack'
+      );
+      assert.equal(ack.deliveredTo, 1);
+
+      phone.ws.send(JSON.stringify({ type: 'phone-text', text: '   ' }));
+      const error = await waitForMessage(
+        phone.messages,
+        (message) => message.type === 'error'
+      );
+      assert.equal(error.code, 'empty_text');
+    } finally {
+      await phone.close();
+      await pc.close();
+    }
+  });
+
+  await t.test('relays the active recognition mode to phones', async () => {
+    const pc = await connectClient(wsUrl, 'pc', token);
+    const phone = await connectClient(wsUrl, 'phone', token);
+
+    try {
+      pc.ws.send(JSON.stringify({ type: 'recognition-mode', mode: 'apple' }));
+      const mode = await waitForMessage(
+        phone.messages,
+        (message) => message.type === 'recognition-mode' && message.mode === 'apple'
+      );
+      assert.equal(mode.mode, 'apple');
+
+      const secondPhone = await connectClient(wsUrl, 'phone', token);
+      try {
+        const initial = await waitForMessage(
+          secondPhone.messages,
+          (message) => message.type === 'recognition-mode'
+        );
+        assert.equal(initial.mode, 'apple');
+      } finally {
+        await secondPhone.close();
+      }
+    } finally {
+      await phone.close();
+      await pc.close();
+    }
+  });
+
   await t.test('broadcasts config updates to phones and PC receivers', async () => {
     const pc = await connectClient(wsUrl, 'pc', token);
     const phone = await connectClient(wsUrl, 'phone', token);
