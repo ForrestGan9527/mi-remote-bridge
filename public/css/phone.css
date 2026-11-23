@@ -1880,3 +1880,49 @@ body.is-preview .footer-text-button {
     height: 12px;
   }
 }
+
+/* Full-bleed phone layout: use the whole browser instead of a centered remote. */
+@media (orientation: portrait) and (max-width: 900px) {
+
+.stage {
+  --rw: min(100vw, 720px);
+  width: 100%;
+  max-width: none;
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: auto;
+  padding:
+    max(8px, env(safe-area-inset-top))
+    max(8px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom))
+    max(8px, env(safe-area-inset-left));
+  gap: 6px;
+}
+
+.remote-shell {
+  width: 100%;
+  max-width: none;
+  flex: 0 0 auto;
+  min-height: auto;
+  margin: 0;
+}
+
+.recognition-display {
+  flex: none;
+}
+
+.key-grid {
+  flex: 0 0 auto;
+  min-height: auto;
+  grid-auto-rows: auto;
+  align-content: start;
+  margin-top: calc(var(--rw) * 0.028);
+  margin-bottom: calc(var(--rw) * 0.02);
+}
+
+.remote-key {
+  aspect-ratio: 1;
+  height: auto;
+  min-height: 0;
+}
+}

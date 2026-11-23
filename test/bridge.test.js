@@ -356,6 +356,45 @@ test('bridge server handles config, keys, voice, and presence', async (t) => {
     }
   });
 
+  await t.test('forwards Windows agent text and results', async () => {
+    const pc = await connectClient(wsUrl, 'pc', token);
+    const agent = await connectClient(wsUrl, 'agent', token);
+
+    try {
+      pc.ws.send(JSON.stringify({
+        type: 'agent-type-text',
+        text: '今天天气真不错'
+      }));
+
+      const forwarded = await waitForMessage(
+        agent.messages,
+        (message) => message.type === 'agent-text'
+      );
+      assert.equal(forwarded.text, '今天天气真不错');
+
+      const ack = await waitForMessage(
+        pc.messages,
+        (message) => message.type === 'agent-ack'
+      );
+      assert.equal(ack.deliveredTo, 1);
+
+      agent.ws.send(JSON.stringify({
+        type: 'agent-result',
+        id: forwarded.id,
+        ok: true
+      }));
+
+      const result = await waitForMessage(
+        pc.messages,
+        (message) => message.type === 'agent-result' && message.id === forwarded.id
+      );
+      assert.equal(result.ok, true);
+    } finally {
+      await agent.close();
+      await pc.close();
+    }
+  });
+
   await t.test('relays the active recognition mode to phones', async () => {
     const pc = await connectClient(wsUrl, 'pc', token);
     const phone = await connectClient(wsUrl, 'phone', token);

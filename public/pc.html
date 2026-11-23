@@ -14,7 +14,7 @@
   </script>
   <title>Remote Bridge · 桌面接收端</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="stylesheet" href="/css/pc.css?v=20261120c">
+  <link rel="stylesheet" href="/css/pc.css?v=20261120j">
 </head>
 <body>
   <div class="page-glow page-glow--one" aria-hidden="true"></div>
@@ -144,9 +144,11 @@
                 <option value="apple">识别：Mac 本机</option>
                 <option value="phone">识别：手机网页</option>
               </select>
-              <select class="config-select output-mode-select" id="outputModeSelect" aria-label="识别结果输出方式" title="剪贴板：复制识别文字；拼音按键：把中文转成拼音并通过键盘输入到当前焦点窗口">
-                <option value="clipboard">输出：剪贴板</option>
-                <option value="pinyin">输出：拼音按键</option>
+              <select class="config-select output-mode-select" id="outputModeSelect" aria-label="识别结果输出方式" title="自动：Mac 前台输入 Mac，RustDesk 前台发送到 Windows；也可固定使用 Mac 剪贴板、Mac 拼音或仅 Windows">
+                <option value="auto">输出：自动（推荐）</option>
+                <option value="clipboard">输出：Mac 剪贴板</option>
+                <option value="pinyin">输出：Mac 拼音</option>
+                <option value="windows">输出：仅 Windows</option>
               </select>
               <div class="voice-status" id="voiceStatus">
                 <span class="voice-status-dot"></span>
@@ -261,6 +263,11 @@
               <span class="system-row-label">本机识别</span>
               <span class="system-row-value" id="systemAppleSpeech">未检测</span>
               <button class="text-button" id="requestSpeechAccessButton" type="button" hidden>授权</button>
+            </div>
+            <div class="system-row">
+              <span class="system-row-label">Windows 助手</span>
+              <span class="system-row-value" id="systemWindowsAgent">未连接</span>
+              <button class="text-button" id="copyAgentCommandButton" type="button">复制启动命令</button>
             </div>
             <div class="system-row">
               <span class="system-row-label">语音触发</span>
@@ -562,6 +569,6 @@
   </div>
 
   <div class="toast" id="pcToast" role="status" aria-live="polite"></div>
-  <script src="/js/pc.js?v=20261120c"></script>
+  <script src="/js/pc.js?v=20261120j"></script>
 </body>
 </html>

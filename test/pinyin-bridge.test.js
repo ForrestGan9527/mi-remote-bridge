@@ -31,6 +31,9 @@ function createFakeSystemBridge() {
   const bridge = new EventEmitter();
   Object.assign(bridge, {
     calls: [],
+    pasteCalls: [],
+    unicodeCalls: [],
+    autoCalls: [],
     status: {
       platform: 'darwin',
       supported: true,
@@ -48,6 +51,18 @@ function createFakeSystemBridge() {
     copyText() {},
     typeText(text, delayMs, options) {
       this.calls.push({ text, delayMs, options });
+      return true;
+    },
+    pasteMacText(text) {
+      this.pasteCalls.push(text);
+      return true;
+    },
+    typeUnicodeText(text) {
+      this.unicodeCalls.push(text);
+      return true;
+    },
+    autoTypeText(text) {
+      this.autoCalls.push(text);
       return true;
     },
     setDefaultInput() {},
@@ -126,12 +141,72 @@ test('PC can request pinyin keyboard input', async (t) => {
   );
   assert.equal(preview.message, 'ni hao, shi jie!');
 
+  ws.send(JSON.stringify({ type: 'system-type-mac-text', text: '你好，Mac' }));
+  await sleep(80);
+  assert.deepEqual(fakeSystemBridge.unicodeCalls, ['你好，Mac']);
+
+  ws.send(JSON.stringify({ type: 'system-paste-mac-text', text: '你好，Mac' }));
+  await sleep(80);
+  assert.deepEqual(fakeSystemBridge.pasteCalls, ['你好，Mac']);
+
+  ws.send(JSON.stringify({ type: 'system-auto-text', text: '自动判断' }));
+  await sleep(80);
+  assert.deepEqual(fakeSystemBridge.autoCalls, ['自动判断']);
+
   ws.send(JSON.stringify({ type: 'system-type-pinyin', text: '   ' }));
   const error = await waitForMessage(messages, (message) => message.type === 'error');
   assert.equal(error.code, 'empty_text');
 
   ws.close();
   await once(ws, 'close');
+});
+
+test('Auto route sends text to connected Windows agents', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-bridge-auto-route-'));
+  const fakeSystemBridge = createFakeSystemBridge();
+  const bridge = await createBridgeServer({
+    rootDir: ROOT_DIR,
+    dataDir: tempDir,
+    https: false,
+    systemBridge: fakeSystemBridge,
+    logger: { info() {}, warn() {} }
+  });
+
+  t.after(async () => {
+    await bridge.stop();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const ports = await bridge.start({ httpPort: 0, httpsPort: 0 });
+  const { token } = await (await fetch(`http://127.0.0.1:${ports.httpPort}/api/session`)).json();
+  const connect = async (role) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${ports.httpPort}/ws`);
+    const messages = [];
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) return;
+      try { messages.push(JSON.parse(data.toString())); } catch {}
+    });
+    await once(ws, 'open');
+    ws.send(JSON.stringify({ type: 'hello', role, token }));
+    await waitForMessage(messages, (message) => message.type === 'ready');
+    return { ws, messages };
+  };
+
+  const pc = await connect('pc');
+  const agent = await connect('agent');
+  try {
+    fakeSystemBridge.emit('route-text', { target: 'windows', text: '自动路由测试' });
+    const forwarded = await waitForMessage(agent.messages, (message) => message.type === 'agent-text');
+    assert.equal(forwarded.text, '自动路由测试');
+    const event = await waitForMessage(
+      pc.messages,
+      (message) => message.type === 'system-event' && message.action === 'autoRoute'
+    );
+    assert.equal(event.ok, true);
+  } finally {
+    await agent.ws.close();
+    await pc.ws.close();
+  }
 });
 
 test('Apple Speech results are forwarded to PC and phone', async (t) => {

@@ -35,7 +35,7 @@
   - 把配置后的按键变成真实键盘快捷键、媒体键、音量键或“聚焦输入框”动作
   - 语音键可按 Fn / 右 Option / 右 Command 的形式按住，配合豆包、Typeless 等语音输入工具
   - 可用 Apple Speech 在 Mac 本机识别手机语音，不依赖手机 Web Speech 或 Mac 输入框焦点
-  - 识别文字可复制到剪贴板，也可转成无音调拼音并通过键盘输入到远程窗口
+  - 识别文字可直接输入 Mac 当前焦点、复制到剪贴板、转成拼音按键，或通过 Windows 助手直接输入中文
   - 状态卡显示虚拟设备、辅助功能权限和错误信息
 
 ## 系统要求
@@ -240,7 +240,7 @@ npm run build:dmg
 - 点击 **保存并同步到手机** 后，布局、隐藏状态、自定义按键和按键功能写入服务端；手机扫码连接后会使用同一设计。
 - 内置按键的名称和含义仍由相邻的 **按键配置** 管理；该列表只显示当前遥控器上可见的默认按键，并提供「单击 / 双击 / 长按动作 → 在设计遥控器中设置」入口。已隐藏的按键不会出现在这里，恢复显示后会重新出现。
 
-手机页面会根据实际屏幕宽高整体缩放；在竖向大屏或平板上取消固定小尺寸上限，遥控器和文字会同步放大。
+手机页面会根据实际屏幕宽高整体缩放；在竖屏手机上遥控器会横向铺满浏览器，同时按键保持正方形比例。由于两列方形按键可能高于屏幕，页面允许轻微纵向滚动以查看底部按键；横屏和桌面浏览器仍使用居中布局。
 
 手机端会应用保存的按键顺序和每行数量；电脑页信号面板里的小遥控器也会同步显示相同的网格。
 
@@ -337,8 +337,10 @@ npm run speech:authorize
 2. 在弹出的输入框中，使用手机输入法（豆包、搜狗、系统键盘等）的语音键听写；
 3. 确认文字无误后点击「发送到电脑」；
 4. 电脑端按照当前「输出」方式处理：
-   - **剪贴板**：复制到 Mac 剪贴板；
-   - **拼音按键**：转成拼音并输入到 RustDesk。
+   - **自动（推荐）**：焦点在 Mac 应用时自动输入 Mac；焦点在 RustDesk 时自动发送到 Windows；
+   - **Mac 剪贴板**：复制到 Mac 剪贴板；
+   - **Mac 拼音**：转成拼音并输入当前 Mac 焦点；
+   - **仅 Windows**：发送给 Windows 助手，直接输入当前 Windows 焦点窗口。
 
 这个方式不依赖 Web Speech API，也不需要 Mac 输入框焦点。电脑端接收端需要保持打开；事件流会显示「收到手机键盘文字」。手机端识别显示框会标注来源为「手机键盘」。
 
@@ -369,6 +371,76 @@ npm run speech:authorize
 - 英文单词会原样保留；如果 Windows 输入法处于中文模式，英文也可能被当作拼音，中英混排时建议改用剪贴板方式。
 - 如果 Mac 输入法自动切换失败，需要手动切到英文（ABC），否则字母可能在本机被输入法消费。
 - 拼音按键依赖辅助功能权限，并且输入目标是 Mac 前台应用中的焦点窗口。
+
+### 自动输出（Mac / Windows）
+
+「输出」选择：
+
+```text
+输出：自动（推荐）
+```
+
+桥接会在输出时检查 Mac 当前前台应用：
+
+- Mac 前台不是 RustDesk：自动用 Unicode 输入到 Mac 当前焦点；
+- Mac 前台是 RustDesk：自动发送给 Windows 助手，由 Windows 输入当前焦点。
+
+因此不需要事先决定“Mac 模式”还是“Windows 模式”，也不需要来回切换。前提是 Windows 助手已经连接；如果焦点在 RustDesk 但助手未连接，会提示失败。
+
+自动模式不适用于 Mac 豆包捕获：豆包识别时文字已经写入 Mac 输入框，自动模式会跳过这次捕获，避免重复输入。Mac 豆包模式请使用手机识别或剪贴板/拼音组合。
+
+### Mac 直接输入（自动模式）
+
+自动模式在 Mac 前台不是 RustDesk 时，会使用 Unicode 键盘事件直接把文字写入当前焦点输入框，不修改剪贴板，因此不会触发 RustDesk 剪贴板同步或 Windows 粘贴窗口。
+
+注意：
+
+- 输入目标是当时 Mac 的前台应用，不会主动切换窗口。
+- 需要辅助功能权限；开启“安全输入”的应用可能拒绝合成文字。
+- 少数应用不接受 Unicode 键盘事件，此时可以使用「Mac 剪贴板」手动粘贴。
+- Mac 豆包捕获文字时，文字已经写在实际输入框中，自动模式会跳过，避免重复输入。
+
+### Windows 直接输入助手
+
+如果 Windows 和 Mac 在同一局域网，可以运行一个 Windows 小助手，把识别出的中文**直接输入到 Windows 当前焦点窗口**，不再经过拼音和 Windows 输入法：
+
+```text
+语音识别中文
+→ 电脑端
+→ WebSocket
+→ Windows 助手
+→ SendInput Unicode
+→ 当前 Windows 输入框
+```
+
+#### 使用步骤
+
+1. 在 Windows 上打开由 Mac 提供的脚本地址：
+   ```text
+   http://<Mac 的局域网 IP>:3000/agent/RemoteBridgeAgent.ps1
+   ```
+2. 在电脑端语音面板把「输出」设为以下之一：
+   - **自动（推荐）**：焦点在 Mac 应用时输入 Mac；RustDesk 前台时发送到 Windows；
+   - **仅 Windows**：固定发送到 Windows 助手。
+3. 在「系统桥接 → Windows 助手」点击「复制启动命令」；命令会在 Windows 后台隐藏启动助手，包含下载地址、WebSocket 地址和配对 token。
+   也可以手动运行：
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\RemoteBridgeAgent.ps1 `
+     -Server ws://<Mac 的局域网 IP>:3000/ws `
+     -Token <配对 token>
+   ```
+4. 助手连接后，「Windows 助手」会显示在线数量。
+5. 在 Windows 中保持目标输入框焦点，然后在手机端说话或发送键盘文字；文字会直接输入。
+
+#### 注意事项
+
+- Windows 助手使用 `SendInput` 的 Unicode 模式，不依赖 Windows 输入法，也不会弹出候选。
+- 如果希望根据焦点自动选择 Mac 或 Windows，选择「自动（推荐）」。
+- 只负责文字输入，不改变 Windows 当前焦点窗口。
+- Windows 和 Mac 需要在同一局域网，且 Windows 能访问 Mac 的 HTTP 端口（默认 3000）。
+- 助手 PowerShell 窗口可以放在后台；不要把助手窗口保持在前台，否则文字会输入到它自己的控制台。
+- 以管理员身份运行的程序可能阻止普通权限助手输入，此时需要以相同权限运行助手。
+- 配对 token 可以控制本机桥接，请勿公网暴露服务。
 
 ### 系统默认输入与识别文字复制
 
@@ -561,7 +633,7 @@ mi-remote-bridge/
 { "type": "hello", "role": "phone", "token": "..." }
 ```
 
-`role` 为 `phone` 或 `pc`。之后：
+`role` 为 `phone`、`pc` 或 `agent`。之后：
 
 | 方向 | 消息 | 说明 |
 | --- | --- | --- |
@@ -577,7 +649,14 @@ mi-remote-bridge/
 | 电脑 → 服务端 | `{"type":"system-set-apple-speech","enabled":true}` | 开关 Apple Speech 本机识别 |
 | 电脑 → 服务端 | `{"type":"system-request-speech-access"}` | 打开语音识别授权窗口 |
 | 服务端 → 电脑 | `{"type":"speech-result","source":"apple","text":"...","final":true}` | Apple Speech 识别结果 |
+| 电脑 → 服务端 | `{"type":"agent-type-text","text":"..."}` | 发送文字给 Windows 助手 |
+| 服务端 → Windows 助手 | `{"type":"agent-text","id":"...","text":"..."}` | Windows 助手需要输入的文字 |
+| 电脑 → 服务端 | `{"type":"agent-ack","id":"...","deliveredTo":1}` | 文字已发送给助手 |
+| Windows 助手 → 服务端 → 电脑 | `{"type":"agent-result","id":"...","ok":true}` | 助手输入结果 |
 | 电脑 → 服务端 | `{"type":"system-type-pinyin","text":"...","waitForRustDesk":true}` | 把识别文字转成拼音，等待 RustDesk 前台后输入 |
+| 电脑 → 服务端 | `{"type":"system-type-mac-text","text":"..."}` | Unicode 直接输入文字到 Mac 当前焦点 |
+| 电脑 → 服务端 | `{"type":"system-auto-text","text":"..."}` | 根据 Mac 前台应用自动选择 Mac 或 Windows |
+| 服务端 → Windows 助手 | `{"type":"agent-text","id":"...","text":"..."}` | 自动路由到 Windows 的文字 |
 | 服务端 → 电脑 | `key` / `voice-start` / `voice-transcript` / `voice-end` / `presence` / `config` / `system-status` / `system-event` | 实时广播 |
 | 服务端 → 手机 | `{"type":"speech-result","source":"mac","text":"..."}` | 把 Mac 豆包识别结果同步到手机显示框 |
 
@@ -600,6 +679,8 @@ npm test
 - Mac 豆包识别结果向手机端同步
 - Apple Speech 识别结果向电脑和手机同步
 - 手机键盘文字转发与确认
+- Windows 助手文字转发与输入结果
+- 自动模式路由到 Windows 助手
 
 本项目开发时还使用 Chromium 和真实 macOS 虚拟音频设备完成了以下手工验收：
 
@@ -608,6 +689,8 @@ npm test
 - 系统动作缺少辅助功能权限时的错误反馈
 - HTTPS 页面录音、二维码配对与移动端布局
 - 拼音按键输入到临时文本窗口，并验证 Mac 输入法自动切换为 ABC 后恢复
+- Mac 直输在 TextEdit 中验证 Unicode 直接输入，无需手动 Cmd+V
+- 自动模式在 TextEdit 中验证 Mac 输入，在 RustDesk 测试 App 中验证路由到 Windows
 - 手机端识别显示框接收 Mac 豆包结果，并在 iPhone / 小屏 / 横屏尺寸下验证布局
 
 ## 已知限制

@@ -854,6 +854,10 @@ final class KeyInjector {
         functionHeld || customTriggerHeld
     }
 
+    func isRemoteAppFrontmost() -> Bool {
+        isRustDeskFrontmost()
+    }
+
     private func isAsciiCapable(_ source: TISInputSource) -> Bool {
         guard let raw = TISGetInputSourceProperty(
             source,
@@ -1064,6 +1068,131 @@ final class KeyInjector {
             true,
             "已向 \(appName) 输入拼音 \(typed) 个字符：\(preview)\(skippedNote)\(switchedNote)"
         )
+    }
+
+    /// Types arbitrary Unicode text into the current macOS focus without
+    /// going through an input method. Used by the "Mac 直输" output mode.
+    func typeUnicodeText(_ text: String) -> (Bool, String) {
+        guard accessibilityTrusted else {
+            return (false, "需要先在系统设置中授予辅助功能权限")
+        }
+        guard !text.isEmpty else {
+            return (false, "没有可输入的文字")
+        }
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            return (false, "无法创建输入事件源")
+        }
+
+        let releaseDeadline = Date().addingTimeInterval(5)
+        while voiceTriggerHeld && Date() < releaseDeadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if voiceTriggerHeld {
+            releaseVoiceTrigger()
+        }
+
+        let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "前台应用"
+        var typed = 0
+
+        for character in text {
+            if character == "\n" {
+                guard let down = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false) else {
+                    continue
+                }
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+                typed += 1
+                Thread.sleep(forTimeInterval: 0.004)
+                continue
+            }
+
+            let units = Array(String(character).utf16)
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
+                continue
+            }
+            units.withUnsafeBufferPointer { buffer in
+                guard let base = buffer.baseAddress else { return }
+                down.keyboardSetUnicodeString(
+                    stringLength: buffer.count,
+                    unicodeString: base
+                )
+            }
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            typed += 1
+            Thread.sleep(forTimeInterval: 0.004)
+        }
+
+        guard typed > 0 else {
+            return (false, "没有可输入的文字")
+        }
+        return (true, "已向 \(appName) 直接输入 \(typed) 个字符")
+    }
+
+    /// Pastes text into the current macOS focus by temporarily placing it on
+    /// the pasteboard and posting Command-V, then restoring the old string.
+    func pasteText(_ text: String) -> (Bool, String) {
+        guard accessibilityTrusted else {
+            return (false, "需要先在系统设置中授予辅助功能权限")
+        }
+        guard !text.isEmpty else {
+            return (false, "没有可输入的文字")
+        }
+        if IsSecureEventInputEnabled() {
+            return (false, "当前应用开启了安全输入，无法自动粘贴")
+        }
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            return (false, "无法创建输入事件源")
+        }
+
+        let releaseDeadline = Date().addingTimeInterval(5)
+        while voiceTriggerHeld && Date() < releaseDeadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if voiceTriggerHeld {
+            releaseVoiceTrigger()
+        }
+
+        let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "前台应用"
+        var previous: String?
+        DispatchQueue.main.sync {
+            let pasteboard = NSPasteboard.general
+            previous = pasteboard.string(forType: .string)
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+        }
+
+        if let commandDown = CGEvent(keyboardEventSource: source, virtualKey: 55, keyDown: true) {
+            commandDown.type = .flagsChanged
+            commandDown.flags = .maskCommand
+            commandDown.post(tap: .cghidEventTap)
+        }
+        Thread.sleep(forTimeInterval: 0.02)
+        if let vDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
+           let vUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) {
+            vDown.flags = .maskCommand
+            vUp.flags = .maskCommand
+            vDown.post(tap: .cghidEventTap)
+            vUp.post(tap: .cghidEventTap)
+        }
+        Thread.sleep(forTimeInterval: 0.02)
+        if let commandUp = CGEvent(keyboardEventSource: source, virtualKey: 55, keyDown: false) {
+            commandUp.type = .flagsChanged
+            commandUp.flags = []
+            commandUp.post(tap: .cghidEventTap)
+        }
+
+        Thread.sleep(forTimeInterval: 0.45)
+        DispatchQueue.main.sync {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            if let previous {
+                pasteboard.setString(previous, forType: .string)
+            }
+        }
+        return (true, "已向 \(appName) 直接粘贴 \(text.count) 个字符")
     }
 
     private func postShift(_ down: Bool, source: CGEventSource) {
@@ -1988,6 +2117,83 @@ func handle(_ command: [String: Any]) {
             emit([
                 "type": "action-result",
                 "action": "typeText",
+                "ok": result.0,
+                "message": result.1
+            ])
+            sendStatus()
+        }
+        return
+
+    case "auto-type-text":
+        guard let text = command["text"] as? String, !text.isEmpty else {
+            emit([
+                "type": "action-result",
+                "action": "autoTypeText",
+                "ok": false,
+                "message": "没有可输入的文字"
+            ])
+            return
+        }
+        let limited = String(text.prefix(4000))
+        if keys.isRemoteAppFrontmost() {
+            emit([
+                "type": "route-text",
+                "target": "windows",
+                "text": limited
+            ])
+            return
+        }
+        typingQueue.async {
+            let result = keys.typeUnicodeText(limited)
+            emit([
+                "type": "action-result",
+                "action": "autoTypeText",
+                "ok": result.0,
+                "message": result.1
+            ])
+            sendStatus()
+        }
+        return
+
+    case "paste-text":
+        guard let text = command["text"] as? String, !text.isEmpty else {
+            emit([
+                "type": "action-result",
+                "action": "pasteMacText",
+                "ok": false,
+                "message": "没有可输入的文字"
+            ])
+            return
+        }
+        let limited = String(text.prefix(4000))
+        typingQueue.async {
+            let result = keys.pasteText(limited)
+            emit([
+                "type": "action-result",
+                "action": "pasteMacText",
+                "ok": result.0,
+                "message": result.1
+            ])
+            sendStatus()
+        }
+        return
+
+    case "type-unicode-text":
+        guard let text = command["text"] as? String, !text.isEmpty else {
+            emit([
+                "type": "action-result",
+                "action": "typeUnicodeText",
+                "ok": false,
+                "message": "没有可输入的文字"
+            ])
+            return
+        }
+        let limited = String(text.prefix(4000))
+        typingQueue.async {
+            let result = keys.typeUnicodeText(limited)
+            emit([
+                "type": "action-result",
+                "action": "typeUnicodeText",
                 "ok": result.0,
                 "message": result.1
             ])

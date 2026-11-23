@@ -166,6 +166,22 @@
     forest: '森林',
     contrast: '清晰'
   };
+  const OUTPUT_MODES = new Set(['auto', 'clipboard', 'pinyin', 'windows']);
+  const LEGACY_OUTPUT_MODES = {
+    mac: 'auto',
+    'mac-windows': 'auto',
+    'windows-clipboard': 'auto',
+    'windows-pinyin': 'auto'
+  };
+
+  function outputFlags(mode = state.outputMode) {
+    return {
+      windows: mode === 'windows',
+      clipboard: mode === 'clipboard',
+      pinyin: mode === 'pinyin',
+      auto: mode === 'auto'
+    };
+  }
 
   const state = {
     ws: null,
@@ -173,6 +189,7 @@
     ready: false,
     phones: 0,
     pcs: 0,
+    agents: 0,
     presenceInitialized: false,
     reconnectAttempt: 0,
     reconnectTimer: null,
@@ -270,6 +287,8 @@
     systemAccessibility: document.getElementById('systemAccessibility'),
     systemAppleSpeech: document.getElementById('systemAppleSpeech'),
     requestSpeechAccessButton: document.getElementById('requestSpeechAccessButton'),
+    systemWindowsAgent: document.getElementById('systemWindowsAgent'),
+    copyAgentCommandButton: document.getElementById('copyAgentCommandButton'),
     systemDefaultInput: document.getElementById('systemDefaultInput'),
     setDefaultMicButton: document.getElementById('setDefaultMicButton'),
     systemTriggerSelect: document.getElementById('systemTriggerSelect'),
@@ -375,6 +394,7 @@
     updateConnectionUi();
     updateSignalBadgeIdle();
     updateSystemCard();
+    updateWindowsAgentStatus();
     syncConfigControls();
     setConfigStatus('clean', '未修改');
     if ('inert' in dom.configDrawer) dom.configDrawer.inert = true;
@@ -556,6 +576,14 @@
         handleSpeechResult(message);
         break;
 
+      case 'agent-ack':
+        handleAgentAck(message);
+        break;
+
+      case 'agent-result':
+        handleAgentResult(message);
+        break;
+
       case 'presence':
         applyPresence(message, false);
         break;
@@ -609,11 +637,14 @@
     if (!presence || typeof presence !== 'object') return;
     const nextPhones = Number(presence.phones) || 0;
     const nextPcs = Number(presence.pcs) || 0;
+    const nextAgents = Number(presence.agents) || 0;
     const oldPhones = state.phones;
+    const oldAgents = state.agents;
     const hadPresence = state.presenceInitialized;
 
     state.phones = nextPhones;
     state.pcs = nextPcs;
+    state.agents = nextAgents;
     state.presenceInitialized = true;
 
     if (!hadPresence && initial) {
@@ -628,8 +659,49 @@
       }
     }
 
+    if (hadPresence && nextAgents !== oldAgents) {
+      addFeed(
+        'system',
+        nextAgents > 0 ? 'Windows 助手已连接' : 'Windows 助手已断开',
+        nextAgents > 0
+          ? `${nextAgents} 个助手在线，可直接输入中文`
+          : '文字不会发送到 Windows'
+      );
+    }
     updateConnectionUi();
     updateSignalBadgeIdle();
+    updateWindowsAgentStatus();
+  }
+
+  function updateWindowsAgentStatus() {
+    if (!dom.systemWindowsAgent) return;
+    const count = Number(state.agents) || 0;
+    dom.systemWindowsAgent.textContent = count > 0 ? `${count} 台在线` : '未连接';
+    dom.systemWindowsAgent.classList.toggle('is-ok', count > 0);
+  }
+
+  function agentConnectionInfo() {
+    const endpoints = state.connectInfo?.endpoints || [];
+    const endpoint = state.connectEndpoint || endpoints[0];
+    let httpUrl = endpoint?.urls?.find((item) => item.protocol === 'http')?.url || '';
+    if (!httpUrl) {
+      httpUrl = endpoints
+        .flatMap((item) => item.urls || [])
+        .find((item) => item.protocol === 'http')?.url || '';
+    }
+    if (!httpUrl) return null;
+    let origin = '';
+    try {
+      const parsed = new URL(httpUrl);
+      origin = `${parsed.protocol}//${parsed.host}`;
+    } catch {
+      origin = httpUrl.replace(/[/?#].*$/, '');
+    }
+    if (!origin) return null;
+    return {
+      ws: `${origin.replace(/^http/, 'ws')}/ws`,
+      download: `${origin}/agent/RemoteBridgeAgent.ps1`
+    };
   }
 
   function updateConnectionUi() {
@@ -1130,16 +1202,25 @@
       if (text) setLatestTranscript(text);
       if (event.origin === 'capture') {
         if (!event.final) return;
-        if (state.outputMode === 'pinyin' && text) {
+        const flags = outputFlags();
+        if (flags.auto) {
+          addFeed('system', '自动输出暂不处理豆包捕获', '识别文字已经在该输入框中；请使用手机或 Mac 本机识别');
+          return;
+        }
+        if (flags.windows && text) {
+          sendAgentText(text);
+        }
+        if (flags.pinyin && text) {
           const alreadyQueued = state.lastPinyinText === text
             && Date.now() - state.lastPinyinAt < 15000;
           if (!alreadyQueued) {
             sendPinyin(text, 0, { waitForRustDesk: true });
           }
-          return;
         }
-        addFeed('system', '识别文字已复制', text || '已复制识别文字');
-        showToast('已复制识别文字，可在 Windows 中粘贴');
+        if (flags.clipboard) {
+          addFeed('system', '识别文字已复制', text || '已复制识别文字');
+          showToast('已复制识别文字，可在 Windows 中粘贴');
+        }
         return;
       }
       addFeed('system', '识别文字已复制', text || '已复制识别文字');
@@ -1153,6 +1234,26 @@
     if (event.ok && event.action === 'typeText') {
       addFeed('system', '拼音按键已发送', event.message || '已输入拼音');
       showToast('拼音已输入到焦点窗口，请用远程输入法选字');
+      return;
+    }
+    if (event.ok && event.action === 'autoTypeText') {
+      addFeed('system', '自动输出到 Mac', event.message || '已输入到当前焦点');
+      showToast('焦点在 Mac，已直接输入');
+      return;
+    }
+    if (event.ok && event.action === 'autoRoute') {
+      addFeed('system', '自动输出到 Windows', event.message || '已发送到 Windows 助手');
+      showToast('焦点在 RustDesk，已发送到 Windows');
+      return;
+    }
+    if (!event.ok && event.action === 'autoRoute') {
+      addFeed('system', '自动输出失败', event.message || 'Windows 助手未连接');
+      showToast(event.message || 'Windows 助手未连接', true);
+      return;
+    }
+    if (event.ok && (event.action === 'typeUnicodeText' || event.action === 'pasteMacText')) {
+      addFeed('system', 'Mac 已直接输入文字', event.message || '已输入到当前焦点');
+      showToast('已直接输入到 Mac 当前焦点，无需 Cmd+V');
       return;
     }
     if (!event.ok) {
@@ -1283,30 +1384,90 @@
     if (!text) return;
     setLatestTranscript(text);
     addFeed('system', '收到手机键盘文字', text);
-    if (state.outputMode === 'pinyin') {
+    const flags = outputFlags();
+    if (flags.auto) {
+      sendAutoText(text);
+      return;
+    }
+    if (flags.windows) {
+      sendAgentText(text);
+    }
+    if (flags.pinyin) {
       // Keyboard text must follow the current focus. Do not activate
       // RustDesk or wait for it; the user may be targeting any app.
       sendPinyin(text, 0, { waitForRustDesk: false });
+    }
+    if (flags.clipboard && !sendJson({ type: 'system-copy-text', text })) {
+      showToast('服务未连接，无法复制手机文字', true);
+    }
+  }
+
+  function sendAgentText(text) {
+    if (!text) return false;
+    if (!sendJson({ type: 'agent-type-text', text })) {
+      showToast('服务未连接，无法发送到 Windows 助手', true);
+      return false;
+    }
+    return true;
+  }
+
+  function sendAutoText(text) {
+    if (!text) return false;
+    if (!sendJson({ type: 'system-auto-text', text })) {
+      showToast('服务未连接，无法自动输出', true);
+      return false;
+    }
+    return true;
+  }
+
+  function handleAgentAck(message) {
+    if (Number(message.deliveredTo) === 0) {
+      const flags = outputFlags();
+      if (flags.clipboard || flags.pinyin) {
+        addFeed('system', 'Windows 助手未连接', 'Mac 输出已完成');
+        showToast('Windows 助手未连接；Mac 输出已完成');
+      } else {
+        addFeed('system', 'Windows 助手未连接', '请在 Windows 上运行文本助手后重试');
+        showToast('Windows 助手未连接，文字未发送', true);
+      }
       return;
     }
-    if (!sendJson({ type: 'system-copy-text', text })) {
-      showToast('服务未连接，无法复制手机文字', true);
+    addFeed('system', '已发送到 Windows 助手', '正在输入当前 Windows 焦点窗口');
+  }
+
+  function handleAgentResult(message) {
+    if (message.ok) {
+      addFeed('system', 'Windows 已输入文字', '');
+    } else {
+      addFeed('system', 'Windows 输入失败', message.error || '助手返回错误');
+      showToast(message.error || 'Windows 输入失败', true);
     }
   }
 
   function applyVoiceOutput(text) {
     if (!text) return false;
-    if (state.outputMode === 'pinyin') {
+    const flags = outputFlags();
+    if (flags.auto) {
+      return sendAutoText(text);
+    }
+    let delivered = false;
+    if (flags.windows) {
+      delivered = sendAgentText(text) || delivered;
+    }
+    if (flags.pinyin) {
       // Apple Speech is already running on the Mac; type into whatever the
       // user has focused instead of waiting for RustDesk to be activated.
       sendPinyin(text, 0, { waitForRustDesk: false });
-      return true;
+      delivered = true;
     }
-    if (!sendJson({ type: 'system-copy-text', text })) {
-      showToast('服务未连接，无法复制识别文字', true);
-      return false;
+    if (flags.clipboard) {
+      if (sendJson({ type: 'system-copy-text', text })) {
+        delivered = true;
+      } else {
+        showToast('服务未连接，无法复制识别文字', true);
+      }
     }
-    return true;
+    return delivered;
   }
 
   function handleSpeechResult(message) {
@@ -1428,16 +1589,16 @@
 
   function readOutputMode() {
     try {
-      return localStorage.getItem('remoteBridge.outputMode') === 'pinyin'
-        ? 'pinyin'
-        : 'clipboard';
+      const mode = localStorage.getItem('remoteBridge.outputMode');
+      if (OUTPUT_MODES.has(mode)) return mode;
+      return LEGACY_OUTPUT_MODES[mode] || 'clipboard';
     } catch {
       return 'clipboard';
     }
   }
 
   function applyOutputMode(mode) {
-    state.outputMode = mode === 'pinyin' ? 'pinyin' : 'clipboard';
+    state.outputMode = OUTPUT_MODES.has(mode) ? mode : 'clipboard';
     dom.outputModeSelect.value = state.outputMode;
     try {
       localStorage.setItem('remoteBridge.outputMode', state.outputMode);
@@ -1481,8 +1642,9 @@
   function maybeHandlePhoneTranscript(entry) {
     if (state.recognitionMode !== 'phone' || entry.source === 'file') return;
     const text = (entry.transcript || '').trim();
+    const flags = outputFlags();
     if (!text) {
-      if (state.outputMode === 'clipboard') {
+      if (flags.clipboard) {
         sendJson({ type: 'system-clear-text' });
         showToast('手机浏览器没有返回识别文字，剪贴板已清空', true);
       } else {
@@ -1491,11 +1653,17 @@
       addFeed('system', '手机未返回识别文字', '请确认手机浏览器支持语音识别，或改用 Mac 豆包模式');
       return;
     }
-    if (state.outputMode === 'pinyin') {
-      sendPinyin(text, 0, { waitForRustDesk: true });
+    if (flags.auto) {
+      sendAutoText(text);
       return;
     }
-    if (!sendJson({ type: 'system-copy-text', text })) {
+    if (flags.windows) {
+      sendAgentText(text);
+    }
+    if (flags.pinyin) {
+      sendPinyin(text, 0, { waitForRustDesk: true });
+    }
+    if (flags.clipboard && !sendJson({ type: 'system-copy-text', text })) {
       showToast('服务未连接，无法复制手机识别文字', true);
     }
   }
@@ -3994,11 +4162,17 @@
       showToast(`已切换到${THEME_LABELS[theme]}主题`);
     });
     dom.outputModeSelect.addEventListener('change', () => {
-      const mode = dom.outputModeSelect.value === 'pinyin' ? 'pinyin' : 'clipboard';
+      const mode = OUTPUT_MODES.has(dom.outputModeSelect.value)
+        ? dom.outputModeSelect.value
+        : 'clipboard';
       applyOutputMode(mode);
-      showToast(mode === 'pinyin'
-        ? '拼音按键：语音识别会等待 RustDesk；手机键盘文字直接输入当前焦点'
-        : '识别结果会复制到剪贴板，可在 Windows 中粘贴');
+      const labels = {
+        clipboard: '识别结果会复制到 Mac 剪贴板',
+        auto: '自动判断：Mac 前台输入 Mac；RustDesk 前台发送到 Windows 助手',
+        pinyin: '识别结果会转为 Mac 拼音按键',
+        windows: '识别结果只发送到 Windows 助手'
+      };
+      showToast(labels[mode]);
     });
     dom.autoplayToggle.addEventListener('click', toggleAutoplay);
     dom.copyTranscriptButton.addEventListener('click', () => {
@@ -4068,6 +4242,15 @@
       }
       showToast('已请求语音识别权限；若未弹窗，请在系统设置 → 隐私与安全性 → 语音识别中允许');
       setTimeout(() => sendJson({ type: 'system-refresh' }), 1200);
+    });
+    dom.copyAgentCommandButton.addEventListener('click', () => {
+      const info = agentConnectionInfo();
+      if (!info || !state.token) {
+        showToast('还没有可用的局域网地址，请刷新连接信息', true);
+        return;
+      }
+      const command = `$u='${info.download}'; $f="$env:TEMP\\RemoteBridgeAgent.ps1"; iwr $u -OutFile $f; Start-Process powershell -WindowStyle Hidden -ArgumentList @('-ExecutionPolicy','Bypass','-File',$f,'-Server','${info.ws}','-Token','${state.token}')`;
+      copyText(command, '已复制 Windows 助手后台启动命令');
     });
     dom.systemTriggerSelect.addEventListener('change', () => {
       const value = dom.systemTriggerSelect.value;
