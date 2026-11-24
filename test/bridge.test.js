@@ -423,6 +423,34 @@ test('bridge server handles config, keys, voice, and presence', async (t) => {
     }
   });
 
+  await t.test('relays recognition language to phones', async () => {
+    const pc = await connectClient(wsUrl, 'pc', token);
+    const phone = await connectClient(wsUrl, 'phone', token);
+
+    try {
+      pc.ws.send(JSON.stringify({ type: 'recognition-language', language: 'en-US' }));
+      const language = await waitForMessage(
+        phone.messages,
+        (message) => message.type === 'recognition-language' && message.language === 'en-US'
+      );
+      assert.equal(language.language, 'en-US');
+
+      const secondPhone = await connectClient(wsUrl, 'phone', token);
+      try {
+        const initial = await waitForMessage(
+          secondPhone.messages,
+          (message) => message.type === 'recognition-language'
+        );
+        assert.equal(initial.language, 'en-US');
+      } finally {
+        await secondPhone.close();
+      }
+    } finally {
+      await phone.close();
+      await pc.close();
+    }
+  });
+
   await t.test('broadcasts config updates to phones and PC receivers', async () => {
     const pc = await connectClient(wsUrl, 'pc', token);
     const phone = await connectClient(wsUrl, 'phone', token);

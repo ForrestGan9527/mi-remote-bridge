@@ -1,5 +1,6 @@
 node_modules/
 data/config.json
+data/models/
 certs/*.pem
 certs/*.cnf
 certs/meta.json

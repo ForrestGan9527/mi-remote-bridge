@@ -11,7 +11,9 @@ async function main() {
     helperPath: process.env.HELPER_PATH || undefined,
     systemBridgeAutoBuild: process.env.DISABLE_NATIVE_BUILD !== '1',
     https: process.env.HTTPS_DISABLED === '1' ? false : true,
-    systemBridge: process.env.DISABLE_SYSTEM_BRIDGE === '1' ? false : true
+    systemBridge: process.env.DISABLE_SYSTEM_BRIDGE === '1' ? false : true,
+    localSpeech: process.env.DISABLE_LOCAL_SPEECH === '1' ? false : true,
+    autoStartWindowsAgent: process.env.AUTO_START_WINDOWS_AGENT === '1'
   });
   let ports;
   try {

@@ -34,6 +34,7 @@ function createFakeSystemBridge() {
     pasteCalls: [],
     unicodeCalls: [],
     autoCalls: [],
+    speechLanguages: [],
     status: {
       platform: 'darwin',
       supported: true,
@@ -63,6 +64,10 @@ function createFakeSystemBridge() {
     },
     autoTypeText(text) {
       this.autoCalls.push(text);
+      return true;
+    },
+    setSpeechLanguage(language) {
+      this.speechLanguages.push(language);
       return true;
     },
     setDefaultInput() {},
@@ -152,6 +157,10 @@ test('PC can request pinyin keyboard input', async (t) => {
   ws.send(JSON.stringify({ type: 'system-auto-text', text: '自动判断' }));
   await sleep(80);
   assert.deepEqual(fakeSystemBridge.autoCalls, ['自动判断']);
+
+  ws.send(JSON.stringify({ type: 'recognition-language', language: 'en-US' }));
+  await sleep(80);
+  assert.deepEqual(fakeSystemBridge.speechLanguages, ['en-US']);
 
   ws.send(JSON.stringify({ type: 'system-type-pinyin', text: '   ' }));
   const error = await waitForMessage(messages, (message) => message.type === 'error');

@@ -1068,6 +1068,37 @@ a {
   font-size: 9px;
 }
 
+.local-model-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.local-model-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.local-model-row .text-button {
+  flex: none;
+  color: var(--accent);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.local-model-row .text-button:disabled {
+  color: var(--muted-deep);
+  cursor: default;
+}
+
 .output-mode-select {
   width: 138px;
   height: 30px;

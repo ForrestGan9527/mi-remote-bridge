@@ -35,6 +35,8 @@
   - 把配置后的按键变成真实键盘快捷键、媒体键、音量键或“聚焦输入框”动作
   - 语音键可按 Fn / 右 Option / 右 Command 的形式按住，配合豆包、Typeless 等语音输入工具
   - 可用 Apple Speech 在 Mac 本机识别手机语音，不依赖手机 Web Speech 或 Mac 输入框焦点
+  - 可用 SenseVoice 在 Node 中完全离线识别手机语音，不需要系统语音识别权限；首次使用需下载约 163 MB 模型
+  - 识别语言可在中文 / English 之间切换
   - 识别文字可直接输入 Mac 当前焦点、复制到剪贴板、转成拼音按键，或通过 Windows 助手直接输入中文
   - 状态卡显示虚拟设备、辅助功能权限和错误信息
 
@@ -53,6 +55,7 @@
 - 手机与电脑连接同一个局域网 / Wi-Fi
 - 手机使用 HTTPS 页面访问，才能获得麦克风权限
 - 要执行真实按键动作或按住语音触发键，需要在「系统设置 → 隐私与安全性 → 辅助功能」中允许本机桥接 / 启动它的终端应用
+- 使用「本机 SenseVoice」识别时，首次需要联网下载约 163 MB 模型；之后完全离线，不需要额外系统权限
 
 ## 快速开始
 
@@ -156,6 +159,65 @@ npm run build:dmg
 - 请保留项目根目录的 `.signing/`（已 gitignore）：它保存本地签名身份，删除后重新打包会改变签名，辅助功能授权也会失效。
 - 如需分发给其他 Mac 并完全避免「未识别的开发者」提示，需要使用 Apple Developer ID 签名并公证。
 - 应用使用独立的配置目录；如需沿用开发时的按键布局，退出应用后把 `data/config.json` 复制到 `~/Library/Application Support/RemoteBridge/config.json`，再重新打开应用。
+
+## 在 Windows 上运行服务（实验性）
+
+Node 服务、网页端和本机 SenseVoice 识别可以运行在 Windows 上；Swift 系统桥接和虚拟麦克风仍然只有 macOS 支持。
+
+### 一键启动（推荐）
+
+1. 安装 [Node.js 20+](https://nodejs.org/)（只需一次；也可以执行 `winget install OpenJS.NodeJS.LTS`）。
+2. 下载 / 解压本项目，双击项目根目录的 **`start-windows.cmd`**。
+3. 脚本会自动完成：
+   - 检查 Node.js；
+   - 首次运行执行 `npm install`；
+   - 下载约 163 MB 的 SenseVoice 模型；
+   - 设置 `AUTO_START_WINDOWS_AGENT=1`；
+   - 启动服务并打开 `http://localhost:3000/pc`。
+4. 在电脑端页面第一次打开时，会自动选择 **识别：本机 SenseVoice** 和 **输出：仅 Windows**。
+5. 手机扫描二维码，首次打开 HTTPS 时接受证书警告，然后即可使用。
+
+如果 Node.js 没有安装，脚本会提示安装地址并退出。手机录音需要 HTTPS；项目内置了纯 JavaScript 证书生成器，**Windows 不再需要 OpenSSL 或 mkcert**，使用自签名证书并在手机上接受一次警告即可。想要手机不显示证书警告时，仍可按下面的 mkcert 方式替换证书。
+
+### 手动启动
+
+```powershell
+npm install
+npm run model:download
+$env:AUTO_START_WINDOWS_AGENT = "1"
+npm start
+```
+
+运行后：
+
+1. 在 Windows 本机打开 `http://localhost:3000/pc`；
+2. 语音识别来源选择 **本机 SenseVoice**（首次会自动选择）；
+3. 输出方式选择 **仅 Windows**（首次会自动选择）；
+4. 「Windows 助手」行会显示本机助手的连接状态，可以点击 **启动本机助手 / 停止本机助手**；
+5. 手机通过 HTTPS 地址访问并扫码。
+
+Windows 上可用：
+
+- 手机按键展示、配对、二维码、电脑端页面；
+- 手机麦克风 PCM → Node → SenseVoice 离线识别；
+- 手机键盘文字、识别文字通过 Windows 助手输入当前焦点窗口；
+- 本机助手状态检测、一键启动 / 停止、`AUTO_START_WINDOWS_AGENT=1` 自动启动。
+
+Windows 上不可用：
+
+- 虚拟麦克风写入（MiRemoteV / SayAll / BlackHole）；
+- 手机按键执行真实快捷键 / 媒体键 / 音量；
+- Apple Speech、Mac 豆包捕获、Mac 剪贴板 / 拼音 / 自动输出；
+- `.app` / 菜单栏打包。
+
+注意：
+
+- 手机录音需要 HTTPS。项目优先使用系统 `openssl`，没有时自动使用内置的 `selfsigned` 生成证书；Windows 上直接使用自签名证书即可。想要手机完全信任，也可以安装 mkcert 并通过 `CERT_FILE` / `KEY_FILE` 传入生成的证书。
+- 模型下载使用系统 `tar` 解压 `.tar.bz2`；Windows 10 1803+ 自带该命令。如果解压失败，可手动解压到 `data/models/sense-voice/`，确保目录中有 `model.int8.onnx` 和 `tokens.txt`。
+- 「自动」输出依赖 macOS 前台应用判断，Windows 服务端请使用「仅 Windows」。
+- 电脑接收端页面需要保持打开；识别结果由页面决定如何输出。
+- Windows 助手启动时会使用命名互斥量防止重复实例。
+- 本节的 Windows 链路尚未在真实 Windows 机器上完成完整验收；如遇到 PowerShell 或原生依赖问题，请先查看服务端日志。
 
 ## 配对与安全
 
@@ -300,9 +362,50 @@ Fn、右 Option、右 Command、右 Control 这类单独修饰键请使用预设
 
 - **Mac 豆包**（默认）：手机语音进入虚拟麦克风，由 Mac 豆包识别并写入当前 Mac 前台输入框；桥接提取新增文字并复制到剪贴板。需要 Mac 输入框保持焦点。
 - **Mac 本机**：手机语音送到 Mac 后，由 Apple Speech 直接在桥接里识别，不需要 Mac 输入框焦点，也不需要手机 Web Speech。第一次使用需要在「系统桥接 → 本机识别」中授权。识别结果会同步到手机显示框，并继续走剪贴板或拼音输出。
+- **本机 SenseVoice**：手机 PCM 音频留在 Node 服务里，由 `sherpa-onnx-node` + SenseVoiceSmall 在 CPU 上离线识别。不需要辅助功能、语音识别或输入框焦点，也不会上传音频。第一次使用需要下载约 163 MB 的模型。
 - **手机网页**：使用手机浏览器的 Web Speech API 识别，松开语音键后自动处理最终文字，不需要 Mac 输入框焦点。默认复制到 Mac 剪贴板，然后可以通过 RustDesk 剪贴板同步在 Windows 中按 `Ctrl+V` 粘贴；把「输出」设为「拼音按键」时会自动转成拼音并输入到当前 Mac 焦点窗口。
 
 手机网页模式依赖手机浏览器支持语音识别，准确率和可用性由浏览器决定；如果浏览器没有给出转写文字，可以继续使用「复制识别文字」按钮或切回 Mac 豆包模式。
+
+#### 启用本机 SenseVoice（Node 离线识别）
+
+1. 在电脑端语音面板把「识别」切到 **本机 SenseVoice**；
+2. 如果模型还没有安装，识别下拉框旁会出现 **下载本机模型** 按钮，点击后下载约 163 MB 的 SenseVoice 模型；
+3. 也可以在终端提前下载：
+   ```bash
+   npm run model:download
+   ```
+4. 下载完成后模型会自动加载，按住手机语音键说话，松开后由 Node 直接识别，结果会同步到电脑事件流和手机显示框，并继续按当前「输出」方式处理。
+
+模型存放位置：
+
+- 开发模式：`data/models/sense-voice/`
+- 打包应用：`~/Library/Application Support/RemoteBridge/models/sense-voice/`
+
+说明：
+
+- 本机 SenseVoice 不依赖系统桥接：即使没有开启「系统桥接」，也可以识别并复制 / 输出文字。
+- 识别在 Node 进程内完成，模型只从 GitHub Releases 下载一次，音频不会离开本机。
+- SenseVoiceSmall 支持中 / 英 / 日 / 韩 / 粤，会自动判断语种；「识别语言」切换后会把中文 / English 作为提示传给模型。
+- 这是整段识别：说话过程中手机不会实时显示文字，松开语音键后一次性返回结果。10 秒语音通常几十到几百毫秒内完成。
+- 需要 CPU 运算，首次加载模型约 1 秒；模型常驻内存几百 MB。识别期间不会阻塞 WebSocket 音频转发。
+- 使用前需要执行过一次 `npm install`，以安装可选的 `sherpa-onnx-node` 依赖。macOS arm64 / x64 都有预编译包，不需要编译器。
+- 如果提示「本机识别组件不可用」，重新执行 `npm install` 并重启服务；也可以在启动时设置 `DISABLE_LOCAL_SPEECH=1` 完全关闭这个识别来源。
+
+#### 识别语言：中文 / English
+
+「系统桥接 → 识别语言」可以切换：
+
+- **中文**：`zh-CN`
+- **English**：`en-US`
+
+这个设置会同步到 Apple Speech 和手机网页识别。英文语音建议先切到 English，识别准确率会明显提高。
+
+限制：
+
+- Mac 豆包的语言由当前输入法决定，不受这个选项控制。
+- 目前是手动切换，不做逐句自动语言检测；中英混说时效果仍取决于识别器。
+- 英文识别后建议使用「自动」或「仅 Windows」输出；拼音按键主要适合中文。
 
 #### 启用 Mac 本机识别（Apple Speech）
 
@@ -432,6 +535,25 @@ npm run speech:authorize
 4. 助手连接后，「Windows 助手」会显示在线数量。
 5. 在 Windows 中保持目标输入框焦点，然后在手机端说话或发送键盘文字；文字会直接输入。
 
+#### 本机启动与状态检测（服务端运行在 Windows 时）
+
+如果 Remote Bridge 服务本身运行在 Windows 上，电脑端会显示 **启动本机助手 / 停止本机助手** 按钮：
+
+- **未启动**：本机没有运行受管助手；
+- **本机启动中…**：服务端已经拉起隐藏的 PowerShell，但还没有连上 WebSocket；
+- **本机已连接**：本机助手已经连接，可以输入文字；
+- **N 台远程在线**：连接的是其它 Windows 机器上的助手。
+
+实现方式：
+
+- 服务端通过 `presence.localAgents` 判断本机助手是否已经连接；
+- 点击「启动本机助手」时，服务端直接 `spawn` `powershell.exe`，使用 `ws://127.0.0.1:<HTTP 端口>/ws` 和当前配对 token，不需要复制命令；
+- 助手脚本使用命名互斥量避免重复启动多个实例；
+- 点击「停止本机助手」会向带 `local` 标记的助手发送 `agent-shutdown`，并结束服务端拉起的子进程；
+- 设置 `AUTO_START_WINDOWS_AGENT=1` 后，服务启动时会自动拉起本机助手。
+
+「复制启动命令」仍然保留，用于 Mac 服务端控制另一台 Windows，或在 Windows 上手动启动未受管的助手。
+
 #### 注意事项
 
 - Windows 助手使用 `SendInput` 的 Unicode 模式，不依赖 Windows 输入法，也不会弹出候选。
@@ -488,6 +610,7 @@ MiRemoteV 2ch / SayAll / BlackHole 2ch
 - 松开语音键后保留约 140 ms 尾音并刷新 AudioWorklet，再发送 `voice-end`。
 - 电脑端实时接收 PCM，结束后合成为 WAV 供回放。
 - 本机桥接以 300 ms 静音拖尾排空播放队列，再释放 Fn 等触发键，避免尾音被截断。
+- 选择「本机 SenseVoice」时，PCM 会同时留在 Node 服务内，在松手后离线识别；这条路径不经过本机 Swift 桥接。
 - 网页端实时转写仍由手机浏览器的 Web Speech API 提供；部分浏览器可能使用厂商的在线识别服务。PCM 音频本身只发送到你的本机 Node 服务。
 
 ### 选择虚拟麦克风
@@ -532,13 +655,16 @@ MiRemoteV 2ch / SayAll / BlackHole 2ch
 
 ## HTTPS 与手机麦克风
 
-浏览器只在安全上下文中开放 `getUserMedia`。项目启动时会自动用 `openssl` 生成包含当前局域网 IP 的自签名证书，放在 `certs/`：
+浏览器只在安全上下文中开放 `getUserMedia`。项目启动时会自动生成包含当前局域网 IP 的自签名证书，放在 `certs/`：
 
 ```text
 certs/cert.pem
 certs/key.pem
 certs/openssl.cnf
+certs/meta.json
 ```
+
+优先使用系统的 `openssl`；没有 OpenSSL 时（例如 Windows）会自动改用内置的纯 JavaScript 证书生成器，不需要安装额外工具。`meta.json` 记录证书覆盖的 IP 和过期时间，局域网 IP 变化时会自动重新生成。
 
 自签名证书需要首次手动信任。部分手机浏览器即使接受警告，仍可能限制麦克风；这时建议使用 [mkcert](https://github.com/FiloSottile/mkcert) 生成本机受信任证书，并把根证书安装到手机上。
 
@@ -556,7 +682,7 @@ npm start
 
 如果局域网 IP 变化：
 
-- 删除 `certs/cert.pem`、`certs/key.pem`、`certs/openssl.cnf` 后重启，让项目重新生成；
+- 删除 `certs/cert.pem`、`certs/key.pem`、`certs/openssl.cnf`、`certs/meta.json` 后重启，让项目重新生成；
 - 或者按上面的 mkcert 命令重新生成包含新 IP 的证书。
 
 也可以直接指定已有证书：
@@ -576,6 +702,8 @@ CERT_FILE=/path/to/cert.pem KEY_FILE=/path/to/key.pem npm start
 | `KEY_FILE` | — | 自定义私钥路径 |
 | `HTTPS_DISABLED` | — | 设为 `1` 时只启动 HTTP（手机将无法直接录音） |
 | `DISABLE_SYSTEM_BRIDGE` | — | 设为 `1` 时只使用网页功能，不编译 / 启动本机桥接 |
+| `DISABLE_LOCAL_SPEECH` | — | 设为 `1` 时关闭 Node 本机 SenseVoice 识别来源 |
+| `AUTO_START_WINDOWS_AGENT` | — | 在 Windows 上设为 `1` 时，服务启动后自动拉起本机 Windows 文字助手 |
 | `SYSTEM_AUDIO_DEVICE` | 自动 | 本机桥接优先匹配的虚拟设备名称，如 `MiRemoteV 2ch` |
 | `CERT_DIR` | `./certs` | HTTPS 证书目录（打包应用使用 Application Support 目录） |
 | `HELPER_PATH` | 自动编译产物 | 指定预编译的本机桥接可执行文件 |
@@ -600,6 +728,7 @@ npm run build:native
 ```text
 mi-remote-bridge/
 ├── server.js                     # 启动入口
+├── start-windows.cmd             # Windows 一键启动（双击）
 ├── native/
 │   ├── RemoteBridgeHelper.swift  # macOS 音频输出与系统按键桥接
 │   └── AppLauncher.swift         # 打包应用的菜单栏启动器
@@ -608,8 +737,10 @@ mi-remote-bridge/
 │   ├── certificate.js            # 自签名 HTTPS 证书
 │   ├── config-store.js           # 按键 / 动作配置持久化
 │   ├── default-config.js         # 默认配置与动作校验
+│   ├── local-speech.js           # Node 本机 SenseVoice 离线识别与模型下载
 │   ├── network.js                # 局域网 IP 与 URL
-│   └── system-bridge.js          # 编译、启动、管理本机桥接进程
+│   ├── system-bridge.js          # 编译、启动、管理本机桥接进程
+│   └── windows-agent.js          # Windows 本机文字助手启动与连接状态
 ├── public/
 │   ├── index.html                # 手机遥控端（含 /preview 布局预览模式）
 │   ├── pc.html                   # 电脑接收端
@@ -617,11 +748,15 @@ mi-remote-bridge/
 │   ├── css/pc.css
 │   ├── js/phone.js
 │   ├── js/pc.js
-│   └── js/pcm-worklet.js         # 手机 PCM16 实时采集
+│   ├── js/pcm-worklet.js         # 手机 PCM16 实时采集
+│   └── agent/RemoteBridgeAgent.ps1 # Windows 文字输入助手
 ├── scripts/build-native.js       # 手动编译本机桥接
 ├── scripts/build-mac.js          # 打包 .app 与 .dmg
+├── scripts/download-model.js     # 提前下载 SenseVoice 模型
+├── scripts/start-windows.ps1     # Windows 一键启动脚本
 ├── test/bridge.test.js           # 服务端集成测试
 ├── data/config.json              # 运行时生成
+├── data/models/                  # 本机识别模型（首次下载，已 gitignore）
 └── certs/                        # 运行时生成
 ```
 
@@ -633,7 +768,7 @@ mi-remote-bridge/
 { "type": "hello", "role": "phone", "token": "..." }
 ```
 
-`role` 为 `phone`、`pc` 或 `agent`。之后：
+`role` 为 `phone`、`pc` 或 `agent`。Windows 本机助手在 `hello` 中额外携带 `"local": true`。之后：
 
 | 方向 | 消息 | 说明 |
 | --- | --- | --- |
@@ -648,16 +783,24 @@ mi-remote-bridge/
 | 电脑 → 服务端 | `{"type":"system-request-accessibility"}` | 请求辅助功能授权 |
 | 电脑 → 服务端 | `{"type":"system-set-apple-speech","enabled":true}` | 开关 Apple Speech 本机识别 |
 | 电脑 → 服务端 | `{"type":"system-request-speech-access"}` | 打开语音识别授权窗口 |
+| 电脑 → 服务端 | `{"type":"local-speech-download"}` | 下载并加载本机 SenseVoice 模型 |
+| 服务端 → 电脑 | `{"type":"local-speech-status","state":"downloading","progress":{"percent":42}}` | 本机模型下载 / 加载状态 |
 | 服务端 → 电脑 | `{"type":"speech-result","source":"apple","text":"...","final":true}` | Apple Speech 识别结果 |
 | 电脑 → 服务端 | `{"type":"agent-type-text","text":"..."}` | 发送文字给 Windows 助手 |
+| 电脑 → 服务端 | `{"type":"agent-start-local"}` | 在 Windows 服务端启动本机文字助手 |
+| 电脑 → 服务端 | `{"type":"agent-stop-local"}` | 停止带 `local` 标记的本机文字助手 |
+| 服务端 → 电脑 | `{"type":"agent-local-status","supported":true,"running":true,"localConnected":false}` | 本机助手进程 / 连接状态 |
+| 服务端 → Windows 助手 | `{"type":"agent-shutdown"}` | 请求本机助手退出 |
 | 服务端 → Windows 助手 | `{"type":"agent-text","id":"...","text":"..."}` | Windows 助手需要输入的文字 |
 | 电脑 → 服务端 | `{"type":"agent-ack","id":"...","deliveredTo":1}` | 文字已发送给助手 |
 | Windows 助手 → 服务端 → 电脑 | `{"type":"agent-result","id":"...","ok":true}` | 助手输入结果 |
 | 电脑 → 服务端 | `{"type":"system-type-pinyin","text":"...","waitForRustDesk":true}` | 把识别文字转成拼音，等待 RustDesk 前台后输入 |
 | 电脑 → 服务端 | `{"type":"system-type-mac-text","text":"..."}` | Unicode 直接输入文字到 Mac 当前焦点 |
 | 电脑 → 服务端 | `{"type":"system-auto-text","text":"..."}` | 根据 Mac 前台应用自动选择 Mac 或 Windows |
+| 电脑 → 服务端 | `{"type":"recognition-language","language":"en-US"}` | 切换识别语言并同步到手机 |
 | 服务端 → Windows 助手 | `{"type":"agent-text","id":"...","text":"..."}` | 自动路由到 Windows 的文字 |
 | 服务端 → 电脑 | `key` / `voice-start` / `voice-transcript` / `voice-end` / `presence` / `config` / `system-status` / `system-event` | 实时广播 |
+| 服务端 → 电脑 / 手机 | `{"type":"speech-result","source":"local","text":"...","final":true,"latencyMs":70}` | 本机 SenseVoice 识别结果 |
 | 服务端 → 手机 | `{"type":"speech-result","source":"mac","text":"..."}` | 把 Mac 豆包识别结果同步到手机显示框 |
 
 ## 测试
@@ -681,6 +824,11 @@ npm test
 - 手机键盘文字转发与确认
 - Windows 助手文字转发与输入结果
 - 自动模式路由到 Windows 助手
+- 中英文识别语言同步
+- 本机 SenseVoice PCM 缓冲、重采样与识别结果广播
+- 本机模型下载请求与状态同步
+- 无 OpenSSL 环境下的内置 HTTPS 证书生成与复用
+- Windows 本机助手的启动、停止、状态同步和 `local` 连接标记
 
 本项目开发时还使用 Chromium 和真实 macOS 虚拟音频设备完成了以下手工验收：
 
@@ -691,6 +839,7 @@ npm test
 - 拼音按键输入到临时文本窗口，并验证 Mac 输入法自动切换为 ABC 后恢复
 - Mac 直输在 TextEdit 中验证 Unicode 直接输入，无需手动 Cmd+V
 - 自动模式在 TextEdit 中验证 Mac 输入，在 RustDesk 测试 App 中验证路由到 Windows
+- Apple Speech 英文 en-US 使用英文 TTS 验证识别
 - 手机端识别显示框接收 Mac 豆包结果，并在 iPhone / 小屏 / 横屏尺寸下验证布局
 
 ## 已知限制
@@ -704,6 +853,7 @@ npm test
 - 自定义按键也支持单击 / 双击 / 长按三套动作，可在「按键功能」视图中配置；快捷键仍然通过自定义按键行的「录制快捷键」设置单击动作。
 - 暂不包含单击 / 双击 / 长按三套独立动作、应用专属按键方案或宏。
 - 真实快捷键注入需要在用户机器上授予辅助功能权限。本项目已验证未授权时的错误反馈与配置调用链，但授权后的系统级按键注入仍需在实际 Mac 上完成最终确认；macOS 不向自动化提供绕过该权限的方式。
+- 本机 SenseVoice 是整段识别，不提供说话过程中的实时 partial 文字；首次使用需要下载约 163 MB 模型，并占用几百 MB 内存。
 - 语音转写由手机浏览器的 Web Speech API 决定；没有转写不代表音频失败。
 - 上传的音频文件只进入电脑页回放，不进入系统虚拟麦克风。
 - 配对 token 是局域网级轻量方案，不是账号体系。请勿公网暴露服务。
@@ -787,5 +937,6 @@ npm run build:native
 ## 隐私与来源
 
 - 手机麦克风音频只经 WSS 发送到你自己的 Node 服务，再写入本机虚拟音频设备；本项目不上传语音到云端。
+- 选择「本机 SenseVoice」时，音频只在 Node 进程内识别；模型文件从 GitHub Releases 下载一次，之后完全离线。
 - 实时文字转写可能由手机浏览器的 Web Speech 实现调用浏览器厂商的在线服务，取决于浏览器。
 - 本项目的功能方向参考了 [HD838A/remote-mic-app（无线麦 SayAll）](https://github.com/HD838A/remote-mic-app) 的产品思路；本项目代码为独立实现，不包含 SayAll 的虚拟声卡驱动、私有模块或品牌资源。

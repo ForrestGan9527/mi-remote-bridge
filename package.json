@@ -9,6 +9,7 @@
     "dev": "node --watch server.js",
     "test": "node --test",
     "build:native": "node scripts/build-native.js",
+    "model:download": "node scripts/download-model.js",
     "build:mac": "node scripts/build-mac.js",
     "fix:permissions": "tccutil reset Accessibility com.remotebridge.mac || true; tccutil reset Accessibility com.remotebridge.helper || true; tccutil reset Accessibility com.remotebridge.node || true; tccutil reset Microphone com.remotebridge.mac || true; tccutil reset Microphone com.remotebridge.helper || true",
     "build:dmg": "node scripts/build-mac.js --dmg",
@@ -28,9 +29,13 @@
     "express": "^5.3.0",
     "pinyin-pro": "^3.29.5",
     "qrcode": "^1.5.4",
+    "selfsigned": "^5.5.0",
     "ws": "^8.23.0"
   },
   "engines": {
     "node": ">=20"
+  },
+  "optionalDependencies": {
+    "sherpa-onnx-node": "^2.0.3"
   }
 }

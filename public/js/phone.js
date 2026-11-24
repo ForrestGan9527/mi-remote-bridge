@@ -88,6 +88,7 @@
     voiceStarting: false,
     voice: null,
     remoteRecognitionMode: 'phone',
+    remoteRecognitionLanguage: 'zh-CN',
     lastSentKey: null,
     order: [...DEFAULT_LAYOUT_ORDER],
     columns: DEFAULT_LAYOUT_COLUMNS,
@@ -488,7 +489,7 @@
         break;
 
       case 'recognition-mode': {
-        const mode = ['mac', 'apple', 'phone'].includes(message.mode)
+        const mode = ['mac', 'apple', 'local', 'phone'].includes(message.mode)
           ? message.mode
           : 'phone';
         state.remoteRecognitionMode = mode;
@@ -499,30 +500,36 @@
         break;
       }
 
+      case 'recognition-language':
+        state.remoteRecognitionLanguage = message.language === 'en-US' ? 'en-US' : 'zh-CN';
+        break;
+
       case 'speech-result': {
         const isApple = message.source === 'apple';
-        if ((state.voice || state.voiceStarting) && !isApple) break;
+        const isLocal = message.source === 'local';
+        if ((state.voice || state.voiceStarting) && !isApple && !isLocal) break;
         if (message.error && message.final) {
           const detail = String(message.error).trim().slice(0, 160);
           const existing = dom.recognitionText.textContent.trim();
           const hasPhoneText = existing
             && !dom.recognitionText.classList.contains('is-placeholder')
-            && !dom.recognitionSource.textContent.includes('Mac');
+            && !dom.recognitionSource.textContent.includes('Mac')
+            && !dom.recognitionSource.textContent.includes('本机');
           if (hasPhoneText) {
-            showToast('Mac 本机识别失败，保留手机识别文字');
+            showToast('本机识别失败，保留手机识别文字');
             break;
           }
           setRecognitionDisplay('', {
-            source: 'apple',
+            source: isLocal ? 'local' : 'apple',
             live: false,
             placeholder: `本机识别失败：${detail || '未知错误'}`
           });
-          showToast(`Mac 本机识别失败：${detail || '未知错误'}`);
+          showToast(`本机识别失败：${detail || '未知错误'}`);
           break;
         }
         if (typeof message.text === 'string' && message.text.trim()) {
           setRecognitionDisplay(message.text.slice(0, MAX_TRANSCRIPT_LENGTH), {
-            source: isApple ? 'apple' : message.source === 'mac' ? 'mac' : 'phone',
+            source: isLocal ? 'local' : isApple ? 'apple' : message.source === 'mac' ? 'mac' : 'phone',
             live: isApple && !message.final
           });
         }
@@ -1735,7 +1742,9 @@
       });
     } else if (session.cancelled) {
       setRecognitionDisplay('', {
-        source: state.remoteRecognitionMode === 'apple' ? 'apple' : 'mac',
+        source: state.remoteRecognitionMode === 'apple'
+          ? 'apple'
+          : state.remoteRecognitionMode === 'local' ? 'local' : 'mac',
         live: false,
         placeholder: '录音已取消'
       });
@@ -1826,7 +1835,7 @@
     let recognition;
     try {
       recognition = new Recognition();
-      recognition.lang = /^zh/i.test(navigator.language || '') ? navigator.language : 'zh-CN';
+      recognition.lang = state.remoteRecognitionLanguage === 'en-US' ? 'en-US' : 'zh-CN';
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
@@ -1929,6 +1938,8 @@
       sourceLabel = 'Mac 豆包';
     } else if (source === 'apple') {
       sourceLabel = live ? 'Mac 识别中' : 'Mac 本机';
+    } else if (source === 'local') {
+      sourceLabel = live ? '本机识别中' : '本机 SenseVoice';
     } else if (source === 'keyboard') {
       sourceLabel = '手机键盘';
     } else if (source === 'phone') {

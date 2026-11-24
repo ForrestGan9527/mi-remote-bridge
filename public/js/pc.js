@@ -214,7 +214,13 @@
     lastPinyinText: '',
     lastPinyinAt: 0,
     lastAppleFinalText: '',
+    lastLocalFinalText: '',
     recognitionMode: 'mac',
+    recognitionLanguage: 'zh-CN',
+    localSpeech: null,
+    localSpeechPrevState: null,
+    windowsAgent: null,
+    windowsDefaultsApplied: false,
     outputMode: 'clipboard',
     voices: new Map(),
     voiceOrder: [],
@@ -267,6 +273,10 @@
     waveBars: document.getElementById('waveBars'),
     voiceHistory: document.getElementById('voiceHistory'),
     recognitionModeSelect: document.getElementById('recognitionModeSelect'),
+    recognitionLanguageSelect: document.getElementById('recognitionLanguageSelect'),
+    localModelRow: document.getElementById('localModelRow'),
+    localModelText: document.getElementById('localModelText'),
+    localModelButton: document.getElementById('localModelButton'),
     outputModeSelect: document.getElementById('outputModeSelect'),
     voiceHistoryCount: document.getElementById('voiceHistoryCount'),
     autoplayToggle: document.getElementById('autoplayToggle'),
@@ -288,6 +298,7 @@
     systemAppleSpeech: document.getElementById('systemAppleSpeech'),
     requestSpeechAccessButton: document.getElementById('requestSpeechAccessButton'),
     systemWindowsAgent: document.getElementById('systemWindowsAgent'),
+    localAgentButton: document.getElementById('localAgentButton'),
     copyAgentCommandButton: document.getElementById('copyAgentCommandButton'),
     systemDefaultInput: document.getElementById('systemDefaultInput'),
     setDefaultMicButton: document.getElementById('setDefaultMicButton'),
@@ -382,6 +393,8 @@
     dom.themeSelect.value = state.theme;
     state.recognitionMode = readRecognitionMode();
     dom.recognitionModeSelect.value = state.recognitionMode;
+    state.recognitionLanguage = readRecognitionLanguage();
+    dom.recognitionLanguageSelect.value = state.recognitionLanguage;
     state.outputMode = readOutputMode();
     dom.outputModeSelect.value = state.outputMode;
     state.autoplay = readAutoplayPreference();
@@ -553,6 +566,10 @@
           type: 'recognition-mode',
           mode: state.recognitionMode
         });
+        sendJson({
+          type: 'recognition-language',
+          language: state.recognitionLanguage
+        });
         if (message.config) applyServerConfig(message.config);
         applySystemStatus(message.system || {
           supported: false,
@@ -560,12 +577,22 @@
           enabled: false,
           error: '服务端未启用系统桥接'
         });
+        applyLocalSpeechStatus(message.localSpeech);
+        applyWindowsAgentStatus(message.windowsAgent);
         applyPresence(message.presence, true);
         updateConnectionUi();
         break;
 
       case 'system-status':
         applySystemStatus(message);
+        break;
+
+      case 'local-speech-status':
+        applyLocalSpeechStatus(message);
+        break;
+
+      case 'agent-local-status':
+        applyWindowsAgentStatus(message);
         break;
 
       case 'system-event':
@@ -673,11 +700,84 @@
     updateWindowsAgentStatus();
   }
 
+  function applyWindowsAgentStatus(status) {
+    const previousError = state.windowsAgent?.error;
+    state.windowsAgent = status && typeof status === 'object' ? { ...status } : null;
+    updateWindowsAgentStatus();
+    if (state.windowsAgent?.error && state.windowsAgent.error !== previousError) {
+      addFeed('system', 'Windows 助手不可用', state.windowsAgent.error);
+      showToast(state.windowsAgent.error, true);
+    }
+    applyWindowsDefaults();
+  }
+
+  function applyWindowsDefaults() {
+    if (state.windowsDefaultsApplied) return;
+    if (!state.windowsAgent?.supported) return;
+    state.windowsDefaultsApplied = true;
+
+    let storedRecognition = null;
+    let storedOutput = null;
+    try {
+      storedRecognition = localStorage.getItem('remoteBridge.recognitionMode');
+      storedOutput = localStorage.getItem('remoteBridge.outputMode');
+    } catch {
+      // Storage is optional; apply in-memory defaults anyway.
+    }
+
+    let changed = false;
+    if (storedRecognition === null) {
+      applyRecognitionMode('local');
+      changed = true;
+    }
+    if (storedOutput === null) {
+      applyOutputMode('windows');
+      changed = true;
+    }
+    if (changed) {
+      addFeed('system', '已应用 Windows 默认设置', '识别：本机 SenseVoice；输出：仅 Windows');
+    }
+  }
+
   function updateWindowsAgentStatus() {
     if (!dom.systemWindowsAgent) return;
+    const serviceConnected = state.wsOpen && state.ready;
     const count = Number(state.agents) || 0;
-    dom.systemWindowsAgent.textContent = count > 0 ? `${count} 台在线` : '未连接';
-    dom.systemWindowsAgent.classList.toggle('is-ok', count > 0);
+    const local = state.windowsAgent;
+    let text = count > 0 ? `${count} 台在线` : '未连接';
+    if (!serviceConnected) {
+      text = '服务未连接';
+    } else if (local?.supported) {
+      if (local.localConnected) {
+        text = '本机已连接';
+      } else if (local.running) {
+        text = '本机启动中…';
+      } else if (count > 0) {
+        text = `${count} 台远程在线`;
+      } else {
+        text = '未启动';
+      }
+    }
+    dom.systemWindowsAgent.textContent = text;
+    dom.systemWindowsAgent.classList.toggle(
+      'is-ok',
+      serviceConnected && (count > 0 || Boolean(local?.localConnected))
+    );
+    dom.systemWindowsAgent.classList.toggle('is-missing', Boolean(local?.error));
+
+    const button = dom.localAgentButton;
+    if (!button) return;
+    if (!local?.supported) {
+      button.hidden = true;
+      return;
+    }
+    const active = Boolean(local.localConnected || local.running);
+    button.hidden = false;
+    button.textContent = active ? '停止本机助手' : '启动本机助手';
+    button.disabled = !serviceConnected;
+    button.title = local.error || (active
+      ? '停止本机 Windows 文字助手'
+      : '在运行服务的 Windows 电脑上启动文字助手');
   }
 
   function agentConnectionInfo() {
@@ -742,6 +842,7 @@
         dom.connectStatus.textContent = '等待手机扫码';
       }
     }
+    updateWindowsAgentStatus();
   }
 
   // ---------------------------------------------------------------------------
@@ -1251,6 +1352,20 @@
       showToast(event.message || 'Windows 助手未连接', true);
       return;
     }
+    if ((event.action === 'localAgentStart' || event.action === 'localAgentStop') && !event.ok) {
+      addFeed('system', 'Windows 助手操作失败', event.message || '');
+      showToast(event.message || 'Windows 助手操作失败', true);
+      return;
+    }
+    if (event.action === 'localSpeechDownload') {
+      if (event.ok) {
+        addFeed('system', '本机语音模型已就绪', event.message || '');
+      } else {
+        addFeed('system', '本机语音模型下载失败', event.message || '');
+        showToast(event.message || '本机语音模型下载失败', true);
+      }
+      return;
+    }
     if (event.ok && (event.action === 'typeUnicodeText' || event.action === 'pasteMacText')) {
       addFeed('system', 'Mac 已直接输入文字', event.message || '已输入到当前焦点');
       showToast('已直接输入到 Mac 当前焦点，无需 Cmd+V');
@@ -1325,6 +1440,7 @@
     if (!isValidVoiceId(message.id)) return;
     if (state.voices.has(message.id) && !state.voices.get(message.id).ended) return;
     state.lastAppleFinalText = '';
+    state.lastLocalFinalText = '';
     state.currentPhoneTranscript = '';
     state.lastVoicePcmPeak = 0;
     state.lastVoiceEndAt = 0;
@@ -1471,8 +1587,15 @@
   }
 
   function handleSpeechResult(message) {
-    if (message.source !== 'apple' || state.recognitionMode !== 'apple') return;
+    const isApple = message.source === 'apple';
+    const isLocal = message.source === 'local';
+    if (!isApple && !isLocal) return;
+    if (isApple && state.recognitionMode !== 'apple') return;
+    if (isLocal && state.recognitionMode !== 'local') return;
+
     const text = cleanDisplayText(message.text, MAX_TRANSCRIPT_LENGTH, false);
+    const label = isLocal ? '本机识别（SenseVoice）' : 'Mac 本机识别';
+    const shortLabel = isLocal ? '本机识别' : 'Mac 本机识别';
 
     if (message.error) {
       if (!message.final) return;
@@ -1481,19 +1604,36 @@
       if (fallback) {
         state.currentPhoneTranscript = '';
         setLatestTranscript(fallback);
-        addFeed('system', 'Mac 本机识别失败，改用手机识别', fallback);
-        showToast('Mac 本机识别失败，已改用手机识别文字');
+        addFeed('system', `${shortLabel}失败，改用手机识别`, fallback);
+        showToast(`${shortLabel}失败，已改用手机识别文字`);
         applyVoiceOutput(fallback);
         return;
       }
-      addFeed('system', 'Mac 本机识别失败', detail);
-      showToast(`Mac 本机识别失败：${detail}`, true);
+      addFeed('system', `${shortLabel}失败`, detail);
+      showToast(`${shortLabel}失败：${detail}`, true);
       return;
     }
     if (!text) return;
 
     setLatestTranscript(text);
     if (!message.final) return;
+
+    if (isLocal) {
+      if (state.lastLocalFinalText === text) return;
+      state.lastLocalFinalText = text;
+      state.currentPhoneTranscript = '';
+      const latency = Number(message.latencyMs) || (state.lastVoiceEndAt
+        ? Date.now() - state.lastVoiceEndAt
+        : 0);
+      addFeed(
+        'system',
+        latency ? `${label} · ${(latency / 1000).toFixed(1)}s` : label,
+        text
+      );
+      applyVoiceOutput(text);
+      return;
+    }
+
     if (state.lastAppleFinalText === text) return;
     state.lastAppleFinalText = text;
     state.currentPhoneTranscript = '';
@@ -1501,7 +1641,7 @@
     const latency = state.lastVoiceEndAt ? Date.now() - state.lastVoiceEndAt : 0;
     addFeed(
       'system',
-      latency ? `Mac 本机识别 · ${(latency / 1000).toFixed(1)}s` : 'Mac 本机识别',
+      latency ? `${label} · ${(latency / 1000).toFixed(1)}s` : label,
       text
     );
     applyVoiceOutput(text);
@@ -1529,7 +1669,7 @@
   function readRecognitionMode() {
     try {
       const mode = localStorage.getItem('remoteBridge.recognitionMode');
-      if (mode === 'phone' || mode === 'apple') return mode;
+      if (mode === 'phone' || mode === 'apple' || mode === 'local') return mode;
       return 'mac';
     } catch {
       return 'mac';
@@ -1537,9 +1677,10 @@
   }
 
   function applyRecognitionMode(mode) {
-    state.recognitionMode = ['phone', 'apple'].includes(mode) ? mode : 'mac';
+    state.recognitionMode = ['phone', 'apple', 'local'].includes(mode) ? mode : 'mac';
     dom.recognitionModeSelect.value = state.recognitionMode;
     state.lastAppleFinalText = '';
+    state.lastLocalFinalText = '';
     try {
       localStorage.setItem('remoteBridge.recognitionMode', state.recognitionMode);
     } catch {
@@ -1557,6 +1698,86 @@
       type: 'recognition-mode',
       mode: state.recognitionMode
     });
+    updateLocalModelButton();
+  }
+
+  function applyLocalSpeechStatus(status) {
+    if (!status || typeof status !== 'object') return;
+    const previous = state.localSpeech?.state || state.localSpeechPrevState;
+    state.localSpeech = { ...status };
+    state.localSpeechPrevState = status.state;
+    updateLocalModelButton();
+    if (!previous || previous === status.state) return;
+    if (state.recognitionMode !== 'local') return;
+    if (status.state === 'ready') {
+      addFeed('system', '本机识别已就绪', 'SenseVoice 模型已加载，松开语音键后直接识别');
+      showToast('本机识别已就绪');
+    } else if (status.state === 'error') {
+      addFeed('system', '本机识别不可用', status.error || '模型加载失败');
+      showToast(status.error || '本机识别不可用', true);
+    } else if (status.state === 'unavailable') {
+      addFeed('system', '本机识别组件不可用', '请重新执行 npm install 后重启服务');
+    }
+  }
+
+  function updateLocalModelButton() {
+    const row = dom.localModelRow;
+    const button = dom.localModelButton;
+    if (!row || !button) return;
+    const status = state.localSpeech;
+    const stateName = status?.state || 'missing';
+    const isLocal = state.recognitionMode === 'local';
+    let text = '';
+    let label = '';
+    let visible = isLocal;
+    let disabled = false;
+
+    if (!isLocal) {
+      visible = false;
+    } else if (stateName === 'ready' || stateName === 'installed') {
+      visible = false;
+    } else if (stateName === 'downloading') {
+      text = `正在下载本机识别模型 · ${status?.progress?.percent || 0}%`;
+      disabled = true;
+    } else if (stateName === 'loading') {
+      text = '正在加载本机识别模型…';
+      disabled = true;
+    } else if (stateName === 'error') {
+      text = `本机识别模型不可用：${status?.error || '未知错误'}`;
+      label = status?.installed ? '重试加载模型' : '重试下载模型';
+    } else if (stateName === 'unavailable') {
+      text = '本机识别组件不可用，请重新执行 npm install 后重启服务';
+      disabled = true;
+    } else {
+      text = '本机 SenseVoice 需要先下载模型（约 163 MB），之后可完全离线识别';
+      label = '下载本机模型';
+    }
+
+    row.hidden = !visible;
+    dom.localModelText.textContent = text;
+    button.hidden = !label;
+    button.disabled = disabled;
+    if (label) button.textContent = label;
+  }
+
+  function startLocalModelDownload() {
+    if (!state.localSpeech || state.localSpeech.state === 'unavailable') {
+      showToast('本机识别组件不可用，请重新执行 npm install', true);
+      return;
+    }
+    if (state.localSpeech.state === 'downloading') return;
+    if (!sendJson({ type: 'local-speech-download' })) {
+      showToast('服务未连接，无法下载模型', true);
+      return;
+    }
+    state.localSpeech = {
+      ...state.localSpeech,
+      state: 'downloading',
+      progress: { percent: 0, received: 0, total: 0 }
+    };
+    updateLocalModelButton();
+    addFeed('system', '开始下载本机语音模型', '约 163 MB，下载完成后会自动加载');
+    showToast('开始下载本机语音模型');
   }
 
   function readTheme() {
@@ -1585,6 +1806,30 @@
         // Storage is optional.
       }
     }
+  }
+
+  function readRecognitionLanguage() {
+    try {
+      return localStorage.getItem('remoteBridge.recognitionLanguage') === 'en-US'
+        ? 'en-US'
+        : 'zh-CN';
+    } catch {
+      return 'zh-CN';
+    }
+  }
+
+  function applyRecognitionLanguage(language) {
+    state.recognitionLanguage = language === 'en-US' ? 'en-US' : 'zh-CN';
+    dom.recognitionLanguageSelect.value = state.recognitionLanguage;
+    try {
+      localStorage.setItem('remoteBridge.recognitionLanguage', state.recognitionLanguage);
+    } catch {
+      // Storage is optional.
+    }
+    sendJson({
+      type: 'recognition-language',
+      language: state.recognitionLanguage
+    });
   }
 
   function readOutputMode() {
@@ -4144,22 +4389,44 @@
     dom.voiceHistory.addEventListener('click', handleVoiceHistoryClick);
     dom.recognitionModeSelect.addEventListener('change', () => {
       const value = dom.recognitionModeSelect.value;
-      const mode = value === 'phone' || value === 'apple' ? value : 'mac';
+      const mode = ['phone', 'apple', 'local'].includes(value) ? value : 'mac';
       applyRecognitionMode(mode);
       if (mode === 'phone') {
         showToast('已切换为手机网页识别：松开语音键后自动处理识别文字');
       } else if (mode === 'apple') {
         showToast('已切换为 Mac 本机识别：松开语音键后由 Apple Speech 识别，首次需要允许语音识别权限');
+      } else if (mode === 'local') {
+        const status = state.localSpeech?.state;
+        if (status === 'unavailable') {
+          showToast('本机 SenseVoice 组件不可用，请重新执行 npm install', true);
+        } else if (status === 'missing') {
+          addFeed('system', '本机识别模型未安装', '首次使用请点击「下载本机模型」，约 163 MB');
+          showToast('首次使用需要下载本机识别模型（约 163 MB）');
+        } else if (status === 'error') {
+          showToast(state.localSpeech.error || '本机识别模型加载失败', true);
+        } else {
+          showToast('已切换为本机 SenseVoice 识别：松手后由 Node 离线识别');
+        }
       } else {
         showToast('已切换为 Mac 豆包识别：需要 Mac 前台输入框保持焦点');
       }
     });
+    dom.localModelButton?.addEventListener('click', startLocalModelDownload);
     dom.themeSelect.addEventListener('change', () => {
       const theme = Object.hasOwn(THEME_META, dom.themeSelect.value)
         ? dom.themeSelect.value
         : 'ember';
       applyTheme(theme);
       showToast(`已切换到${THEME_LABELS[theme]}主题`);
+    });
+    dom.recognitionLanguageSelect.addEventListener('change', () => {
+      const language = dom.recognitionLanguageSelect.value === 'en-US'
+        ? 'en-US'
+        : 'zh-CN';
+      applyRecognitionLanguage(language);
+      showToast(language === 'en-US'
+        ? '识别语言已切换为 English（Apple Speech / 手机网页）'
+        : '识别语言已切换为中文（Apple Speech / 手机网页）');
     });
     dom.outputModeSelect.addEventListener('change', () => {
       const mode = OUTPUT_MODES.has(dom.outputModeSelect.value)
@@ -4251,6 +4518,16 @@
       }
       const command = `$u='${info.download}'; $f="$env:TEMP\\RemoteBridgeAgent.ps1"; iwr $u -OutFile $f; Start-Process powershell -WindowStyle Hidden -ArgumentList @('-ExecutionPolicy','Bypass','-File',$f,'-Server','${info.ws}','-Token','${state.token}')`;
       copyText(command, '已复制 Windows 助手后台启动命令');
+    });
+    dom.localAgentButton?.addEventListener('click', () => {
+      const local = state.windowsAgent;
+      if (!local?.supported) return;
+      const active = Boolean(local.localConnected || local.running);
+      if (!sendJson({ type: active ? 'agent-stop-local' : 'agent-start-local' })) {
+        showToast('服务未连接，无法操作本机 Windows 助手', true);
+        return;
+      }
+      showToast(active ? '正在停止本机 Windows 助手' : '正在启动本机 Windows 助手');
     });
     dom.systemTriggerSelect.addEventListener('change', () => {
       const value = dom.systemTriggerSelect.value;

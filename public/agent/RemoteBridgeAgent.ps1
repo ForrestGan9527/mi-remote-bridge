@@ -1,14 +1,26 @@
 param(
-    [Parameter(Mandatory = $true)]
     [string]$Server,
-
-    [Parameter(Mandatory = $true)]
     [string]$Token,
-
-    [int]$ReconnectSeconds = 3
+    [int]$ReconnectSeconds = 3,
+    [switch]$Local
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($Server)) { $Server = $env:REMOTE_BRIDGE_SERVER }
+if ([string]::IsNullOrWhiteSpace($Token)) { $Token = $env:REMOTE_BRIDGE_TOKEN }
+$IsLocal = $Local.IsPresent -or $env:REMOTE_BRIDGE_AGENT_LOCAL -eq '1'
+
+if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Token)) {
+    Write-Host 'Missing -Server / -Token (or REMOTE_BRIDGE_SERVER / REMOTE_BRIDGE_TOKEN).' -ForegroundColor Red
+    exit 1
+}
+
+$mutex = New-Object System.Threading.Mutex($false, 'Local\RemoteBridgeAgent')
+if (-not $mutex.WaitOne(0)) {
+    Write-Host 'Remote Bridge Windows Agent is already running.' -ForegroundColor Yellow
+    exit 0
+}
 
 Add-Type -TypeDefinition @'
 using System;
@@ -133,7 +145,8 @@ Write-Host "Server: $wsUrl"
 Write-Host 'Keep the target Windows application focused; this console may stay in the background.' -ForegroundColor DarkGray
 Write-Host ''
 
-while ($true) {
+$shouldExit = $false
+while (-not $shouldExit) {
     $socket = $null
     try {
         $socket = [System.Net.WebSockets.ClientWebSocket]::new()
@@ -147,13 +160,14 @@ while ($true) {
             role = 'agent'
             token = $Token
             name = 'Windows Agent'
+            local = $IsLocal
         }
 
         $buffer = New-Object byte[] 16384
         $builder = New-Object System.Text.StringBuilder
         $segment = [System.ArraySegment[byte]]::new($buffer)
 
-        while ($socket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+        while ($socket.State -eq [System.Net.WebSockets.WebSocketState]::Open -and -not $shouldExit) {
             $result = $socket.ReceiveAsync(
                 $segment,
                 [System.Threading.CancellationToken]::None
@@ -205,7 +219,12 @@ while ($true) {
                 'error' {
                     Write-Host ('[agent] server error: ' + $message.message) -ForegroundColor Red
                 }
+                'agent-shutdown' {
+                    Write-Host '[agent] shutdown requested' -ForegroundColor Yellow
+                    $shouldExit = $true
+                }
             }
+            if ($shouldExit) { break }
         }
     } catch {
         Write-Host ('[agent] disconnected: ' + $_.Exception.Message) -ForegroundColor Yellow
@@ -213,5 +232,9 @@ while ($true) {
         if ($socket) { $socket.Dispose() }
     }
 
-    Start-Sleep -Seconds $ReconnectSeconds
+    if (-not $shouldExit) {
+        Start-Sleep -Seconds $ReconnectSeconds
+    }
 }
+
+try { $mutex.ReleaseMutex() } catch { }

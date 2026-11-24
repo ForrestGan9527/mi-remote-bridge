@@ -469,7 +469,7 @@ final class TextCapture {
 
 final class AppleSpeechRecognizer {
     private let queue = DispatchQueue(label: "remote-bridge.apple-speech")
-    private let locale = Locale(identifier: "zh-CN")
+    private var language = "zh-CN"
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
@@ -490,7 +490,21 @@ final class AppleSpeechRecognizer {
     var enabled = false
 
     init() {
-        recognizer = SFSpeechRecognizer(locale: locale)
+        recognizer = SFSpeechRecognizer(locale: Locale(identifier: language))
+    }
+
+    var speechLanguage: String {
+        language
+    }
+
+    func setLanguage(_ value: String) {
+        let next = value == "en-US" ? "en-US" : "zh-CN"
+        guard next != language else { return }
+        language = next
+        queue.async {
+            self.cancelLocked()
+            self.recognizer = SFSpeechRecognizer(locale: Locale(identifier: next))
+        }
     }
 
     var authorizationName: String {
@@ -543,7 +557,7 @@ final class AppleSpeechRecognizer {
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
             return (false, "需要先在系统设置中允许语音识别权限")
         }
-        guard let recognizer = recognizer ?? SFSpeechRecognizer(locale: locale),
+        guard let recognizer = recognizer ?? SFSpeechRecognizer(locale: Locale(identifier: language)),
               recognizer.isAvailable else {
             return (false, "Apple 语音识别当前不可用")
         }
@@ -724,7 +738,10 @@ final class AppleSpeechRecognizer {
         request?.endAudio()
         finishTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 4.0)
+        // If partial text is already available, commit it quickly. If not,
+        // wait a little longer for the recognizer's first result.
+        let delay = latestText.isEmpty ? 2.0 : 0.6
+        timer.schedule(deadline: .now() + delay)
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             self.finishLocked(error: nil)
@@ -1960,6 +1977,7 @@ func currentStatus() -> [String: Any] {
         "appleSpeechAuthorization": appleSpeech.authorizationName,
         "appleSpeechAvailable": appleSpeech.isAvailable,
         "appleSpeechOnDevice": appleSpeech.supportsOnDevice,
+        "appleSpeechLanguage": appleSpeech.speechLanguage,
         "frontmostApp": frontmost?.localizedName ?? "",
         "frontmostBundleId": frontmost?.bundleIdentifier ?? "",
         "secureInput": IsSecureEventInputEnabled(),
@@ -2062,6 +2080,10 @@ func handle(_ command: [String: Any]) {
 
     case "set-speech-recognition":
         appleSpeech.setEnabled((command["enabled"] as? Bool) ?? false)
+        sendStatus()
+        return
+    case "set-speech-language":
+        appleSpeech.setLanguage((command["language"] as? String) ?? "zh-CN")
         sendStatus()
         return
 
